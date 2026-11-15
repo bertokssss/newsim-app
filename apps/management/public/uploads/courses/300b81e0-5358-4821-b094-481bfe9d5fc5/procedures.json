@@ -1,0 +1,47 @@
+[
+  {
+    "id": "step-2",
+    "stepNumber": 1,
+    "phase": "THEORY",
+    "title": "Classroom Theory, Syllabus Induction & Lecture Slides (PPT)",
+    "description": "Undergo classroom instruction covering STCW modular theoretical standards, comprehensive syllabus review, and presentation slide deck modules.",
+    "hours": 16,
+    "mandatory": true
+  },
+  {
+    "id": "step-1",
+    "stepNumber": 2,
+    "phase": "PREREQUISITE",
+    "title": "Enrollment & Pre-requisite Qualification Verification",
+    "description": "Verification of Seafarer Registration Number (SRN), valid Pre-Employment Medical Examination (PEME), and prerequisite STCW certificates before class admission.",
+    "hours": 2,
+    "mandatory": true
+  },
+  {
+    "id": "step-3",
+    "stepNumber": 3,
+    "phase": "SIMULATOR",
+    "title": "Simulator Practical Exercises & Scenario Drills",
+    "description": "Hands-on bridge / engine-room simulation training, operational procedures, emergency scenario response, and maritime equipment watchkeeping drills.",
+    "hours": 14,
+    "mandatory": true
+  },
+  {
+    "id": "step-4",
+    "stepNumber": 4,
+    "phase": "ASSESSMENT",
+    "title": "Formal Competency Assessment & Examination",
+    "description": "Completion of official written comprehensive examination (minimum passing mark >= 75%) and practical simulator performance demonstration.",
+    "hours": 6,
+    "mandatory": true
+  },
+  {
+    "id": "step-5",
+    "stepNumber": 5,
+    "phase": "CERTIFICATION",
+    "title": "Debriefing, Audit Review & Certificate of Completion",
+    "description": "Instructor performance debriefing, compliance audit log sign-off, and release of MARINA/STCW-accredited Certificate of Training Completion.",
+    "hours": 2,
+    "mandatory": true
+  }
+]

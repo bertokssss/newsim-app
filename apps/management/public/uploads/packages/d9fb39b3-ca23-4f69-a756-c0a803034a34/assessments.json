@@ -1,0 +1,22 @@
+[
+  {
+    "id": "assess_AFF_1da78783-f40d-49d7-9f33-39f25ce8dcf1",
+    "title": "AFF Comprehensive Competency Exam",
+    "assessmentType": "WRITTEN",
+    "passingScore": 75,
+    "durationMinutes": 60,
+    "courseId": "1da78783-f40d-49d7-9f33-39f25ce8dcf1",
+    "courseCode": "AFF",
+    "courseTitle": "Advanced Fire Fighting"
+  },
+  {
+    "id": "assess_f7276a8f-f954-4c40-b8db-403e7d5abaa6",
+    "title": "BT Comprehensive Competency Exam",
+    "assessmentType": "WRITTEN",
+    "passingScore": 75,
+    "durationMinutes": 60,
+    "courseId": "f7276a8f-f954-4c40-b8db-403e7d5abaa6",
+    "courseCode": "BT",
+    "courseTitle": "Basic Training"
+  }
+]

@@ -1,0 +1,11 @@
+PIECES	Problems	Opportunities
+Performance	Manual batch scheduling can result in scheduling conflicts and delays in organizing training sessions.	Automate batch scheduling based on capacity, training duration, and instructor availability.
+Information	Training, attendance, progress, and certification information require manual coordination and may not be readily available in one place.	Provide centralized and updated trainee and training records.
+Economy	Manual coordination and administrative processing require additional time and staff effort.	Reduce repetitive administrative work through digital workflows.
+Control/Security	Access to training and certification information needs to be controlled according to user responsibilities.	Implement role-based user access and controlled modification of records.
+Efficiency	Enrollment, prerequisite checking, attendance monitoring, progress tracking, and certification involve multiple manual steps.	Automate appropriate processes and provide real-time monitoring and status updates.
+Service	Trainees and staff rely on manual coordination for schedules, progress, enrollment, and certification status.	Provide a centralized platform where authorized users can access relevant information and updates.
+
+
+
+Entity Relationship Diagram. The figure below shows an Entity Relationship Diagram (ERD) showing the system’s entities, the various roles employ within the system, and the connections between databases.

@@ -1,0 +1,571 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ====================================================================
+// 1. Profiles (linked to Supabase auth.users)
+// ====================================================================
+model Profile {
+  id                   String    @id @default(uuid()) @db.Uuid
+  email                String    @unique
+  username             String?   @unique
+  first_name           String
+  middle_name          String?
+  last_name            String
+  phone                String?
+  avatar_url           String?
+  role                 String    // SUPER_ADMIN, ADMIN, INSTRUCTOR, TRAINEE
+  status               String    @default("ACTIVE") // ACTIVE, PENDING, SUSPENDED, INACTIVE, LOCKED
+  must_change_password Boolean   @default(false)
+  last_login_at        DateTime? @db.Timestamptz
+  created_at           DateTime  @default(now()) @db.Timestamptz
+  updated_at           DateTime  @default(now()) @updatedAt @db.Timestamptz
+
+  // Role-specific sub-tables
+  super_admin          SuperAdmin?
+  admin                Admin?
+  instructor           Instructor?
+  trainee              Trainee?
+
+  // Reverse relations
+  invitations_sent         Invitation[]       @relation("InvitedBy")
+  courses_created          Course[]           @relation("CourseCreator")
+  learning_materials_created LearningMaterial[] @relation("MaterialCreator")
+  attendance_recorded      Attendance[]       @relation("AttendanceRecorder")
+  assessments_created      Assessment[]       @relation("AssessmentCreator")
+  grades_given             Grade[]            @relation("Grader")
+  payments_verified        Payment[]          @relation("PaymentVerifier")
+  certificates_issued      Certificate[]      @relation("CertificateIssuer")
+  notifications            Notification[]
+  audit_logs               AuditLog[]
+  system_settings_updated  SystemSetting[]    @relation("SettingUpdater")
+
+  @@map("profiles")
+}
+
+// ====================================================================
+// 2. Training Centers
+// ====================================================================
+model TrainingCenter {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String
+  code        String   @unique
+  email       String?
+  phone       String?
+  address     String?
+  city        String?
+  province    String?
+  postal_code String?
+  logo_url    String?
+  status      String   @default("ACTIVE")
+  created_at  DateTime @default(now()) @db.Timestamptz
+  updated_at  DateTime @default(now()) @updatedAt @db.Timestamptz
+
+  admins      Admin[]
+  instructors Instructor[]
+  trainees    Trainee[]
+  invitations Invitation[]
+  courses     Course[]
+  enrollments Enrollment[]   @relation("EnrollmentCenter")
+  schedules   Schedule[]     @relation("ScheduleCenter")
+
+  @@map("training_centers")
+}
+
+// ====================================================================
+// 3. Super Admins
+// ====================================================================
+model SuperAdmin {
+  profile_id      String   @id @db.Uuid
+  employee_number String?  @unique
+  position        String?
+  created_at      DateTime @default(now()) @db.Timestamptz
+  updated_at      DateTime @default(now()) @updatedAt @db.Timestamptz
+
+  profile Profile @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+
+  @@map("super_admins")
+}
+
+// ====================================================================
+// 4. Admins
+// ====================================================================
+model Admin {
+  profile_id         String   @id @db.Uuid
+  employee_number    String?  @unique
+  training_center_id String?  @db.Uuid
+  position           String?
+  created_at         DateTime @default(now()) @db.Timestamptz
+  updated_at         DateTime @default(now()) @updatedAt @db.Timestamptz
+
+  profile        Profile         @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+  trainingCenter TrainingCenter? @relation(fields: [training_center_id], references: [id])
+
+  @@map("admins")
+}
+
+// ====================================================================
+// 5. Instructors
+// ====================================================================
+model Instructor {
+  profile_id         String    @id @db.Uuid
+  instructor_number  String?   @unique
+  training_center_id String?   @db.Uuid
+  specialization     String?
+  qualification      String?
+  license_number     String?
+  license_expiry     DateTime? @db.Date
+  bio                String?
+  employment_status  String    @default("ACTIVE")
+  created_at         DateTime  @default(now()) @db.Timestamptz
+  updated_at         DateTime  @default(now()) @updatedAt @db.Timestamptz
+
+  profile        Profile         @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+  trainingCenter TrainingCenter? @relation(fields: [training_center_id], references: [id])
+  course_instructors CourseInstructor[]
+  schedules      Schedule[]
+
+  @@map("instructors")
+}
+
+// ====================================================================
+// 6. Trainees
+// ====================================================================
+model Trainee {
+  profile_id                     String    @id @db.Uuid
+  trainee_number                 String?   @unique
+  training_center_id             String?   @db.Uuid
+  date_of_birth                  DateTime? @db.Date
+  gender                         String?
+  nationality                    String?
+  address                        String?
+  city                           String?
+  province                       String?
+  emergency_contact_name         String?
+  emergency_contact_phone        String?
+  emergency_contact_relationship String?
+  enrollment_status              String    @default("PENDING")
+  created_at                     DateTime  @default(now()) @db.Timestamptz
+  updated_at                     DateTime  @default(now()) @updatedAt @db.Timestamptz
+
+  profile        Profile         @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+  trainingCenter TrainingCenter? @relation(fields: [training_center_id], references: [id])
+  enrollments    Enrollment[]
+  attendances    Attendance[]
+  assessment_attempts AssessmentAttempt[]
+  grades         Grade[]
+  payments       Payment[]
+  certificates   Certificate[]
+
+  @@map("trainees")
+}
+
+// ====================================================================
+// 7. Invitations
+// ====================================================================
+model Invitation {
+  id                 String    @id @default(uuid()) @db.Uuid
+  email              String
+  role               String
+  training_center_id String?   @db.Uuid
+  invited_by         String?   @db.Uuid
+  token_hash         String?   @unique
+  expires_at         DateTime  @db.Timestamptz
+  accepted_at        DateTime? @db.Timestamptz
+  status             String    @default("PENDING")
+  created_at         DateTime  @default(now()) @db.Timestamptz
+
+  trainingCenter TrainingCenter? @relation(fields: [training_center_id], references: [id])
+  inviter        Profile?        @relation("InvitedBy", fields: [invited_by], references: [id])
+
+  @@map("invitations")
+}
+
+// ====================================================================
+// 8. Courses
+// ====================================================================
+model Course {
+  id                 String   @id @default(uuid()) @db.Uuid
+  training_center_id String?  @db.Uuid
+  code               String?  @unique
+  name               String
+  description        String?
+  category           String?
+  duration_hours     Int?
+  price              Decimal  @default(0) @db.Decimal
+  status             String   @default("DRAFT") // DRAFT, PUBLISHED, ARCHIVED
+  created_by         String?  @db.Uuid
+  created_at         DateTime @default(now()) @db.Timestamptz
+  updated_at         DateTime @default(now()) @updatedAt @db.Timestamptz
+
+  trainingCenter TrainingCenter? @relation(fields: [training_center_id], references: [id])
+  creator        Profile?        @relation("CourseCreator", fields: [created_by], references: [id])
+  course_instructors CourseInstructor[]
+  modules        CourseModule[]
+  enrollments    Enrollment[]
+  schedules      Schedule[]
+  assessments    Assessment[]
+  grades         Grade[]        @relation("CourseGrades")
+  certificates   Certificate[]  @relation("CourseCertificates")
+
+  @@map("courses")
+}
+
+// ====================================================================
+// 9. Course Instructors (Many-to-Many)
+// ====================================================================
+model CourseInstructor {
+  course_id     String   @db.Uuid
+  instructor_id String   @db.Uuid
+  assigned_at   DateTime @default(now()) @db.Timestamptz
+
+  course     Course     @relation(fields: [course_id], references: [id], onDelete: Cascade)
+  instructor Instructor @relation(fields: [instructor_id], references: [profile_id], onDelete: Cascade)
+
+  @@id([course_id, instructor_id])
+  @@map("course_instructors")
+}
+
+// ====================================================================
+// 10. Course Modules
+// ====================================================================
+model CourseModule {
+  id          String   @id @default(uuid()) @db.Uuid
+  course_id   String   @db.Uuid
+  title       String
+  description String?
+  sort_order  Int
+  status      String   @default("ACTIVE")
+  created_at  DateTime @default(now()) @db.Timestamptz
+  updated_at  DateTime @default(now()) @updatedAt @db.Timestamptz
+
+  course             Course             @relation(fields: [course_id], references: [id], onDelete: Cascade)
+  learning_materials LearningMaterial[]
+  assessments        Assessment[]
+
+  @@map("course_modules")
+}
+
+// ====================================================================
+// 11. Learning Materials
+// ====================================================================
+model LearningMaterial {
+  id            String   @id @default(uuid()) @db.Uuid
+  module_id     String   @db.Uuid
+  title         String
+  description   String?
+  material_type String   // PDF, VIDEO, DOCUMENT, PRESENTATION, IMAGE, LINK
+  file_url      String?
+  external_url  String?
+  sort_order    Int      @default(0)
+  created_by    String?  @db.Uuid
+  created_at    DateTime @default(now()) @db.Timestamptz
+  updated_at    DateTime @default(now()) @updatedAt @db.Timestamptz
+
+  module  CourseModule @relation(fields: [module_id], references: [id], onDelete: Cascade)
+  creator Profile?     @relation("MaterialCreator", fields: [created_by], references: [id])
+
+  @@map("learning_materials")
+}
+
+// ====================================================================
+// 12. Enrollments
+// ====================================================================
+model Enrollment {
+  id                 String    @id @default(uuid()) @db.Uuid
+  trainee_id         String    @db.Uuid
+  course_id          String    @db.Uuid
+  training_center_id String?   @db.Uuid
+  status             String    @default("PENDING") // PENDING, APPROVED, ACTIVE, COMPLETED, CANCELLED
+  enrolled_at        DateTime  @default(now()) @db.Timestamptz
+  completed_at       DateTime? @db.Timestamptz
+  created_at         DateTime  @default(now()) @db.Timestamptz
+  updated_at         DateTime  @default(now()) @updatedAt @db.Timestamptz
+
+  trainee        Trainee         @relation(fields: [trainee_id], references: [profile_id], onDelete: Cascade)
+  course         Course          @relation(fields: [course_id], references: [id], onDelete: Cascade)
+  trainingCenter TrainingCenter? @relation("EnrollmentCenter", fields: [training_center_id], references: [id])
+  grades         Grade[]
+  payments       Payment[]
+  certificates   Certificate[]
+
+  @@map("enrollments")
+}
+
+// ====================================================================
+// 13. Schedules
+// ====================================================================
+model Schedule {
+  id                 String   @id @default(uuid()) @db.Uuid
+  course_id          String   @db.Uuid
+  instructor_id      String?  @db.Uuid
+  training_center_id String?  @db.Uuid
+  start_at           DateTime @db.Timestamptz
+  end_at             DateTime @db.Timestamptz
+  room               String?
+  capacity           Int?
+  status             String   @default("SCHEDULED")
+  created_at         DateTime @default(now()) @db.Timestamptz
+  updated_at         DateTime @default(now()) @updatedAt @db.Timestamptz
+
+  course         Course          @relation(fields: [course_id], references: [id], onDelete: Cascade)
+  instructor     Instructor?     @relation(fields: [instructor_id], references: [profile_id])
+  trainingCenter TrainingCenter? @relation("ScheduleCenter", fields: [training_center_id], references: [id])
+  attendances    Attendance[]
+
+  @@map("schedules")
+}
+
+// ====================================================================
+// 14. Attendance
+// ====================================================================
+model Attendance {
+  id          String    @id @default(uuid()) @db.Uuid
+  schedule_id String    @db.Uuid
+  trainee_id  String    @db.Uuid
+  status      String    // PRESENT, ABSENT, LATE, EXCUSED
+  check_in_at DateTime? @db.Timestamptz
+  remarks     String?
+  recorded_by String?   @db.Uuid
+  created_at  DateTime  @default(now()) @db.Timestamptz
+
+  schedule Schedule @relation(fields: [schedule_id], references: [id], onDelete: Cascade)
+  trainee  Trainee  @relation(fields: [trainee_id], references: [profile_id], onDelete: Cascade)
+  recorder Profile? @relation("AttendanceRecorder", fields: [recorded_by], references: [id])
+
+  @@map("attendance")
+}
+
+// ====================================================================
+// 15. Assessments
+// ====================================================================
+model Assessment {
+  id               String   @id @default(uuid()) @db.Uuid
+  course_id        String   @db.Uuid
+  module_id        String?  @db.Uuid
+  title            String
+  description      String?
+  assessment_type  String
+  passing_score    Decimal  @db.Decimal
+  duration_minutes Int?
+  attempts_allowed Int      @default(1)
+  status           String   @default("DRAFT")
+  created_by       String?  @db.Uuid
+  created_at       DateTime @default(now()) @db.Timestamptz
+  updated_at       DateTime @default(now()) @updatedAt @db.Timestamptz
+
+  course    Course        @relation(fields: [course_id], references: [id], onDelete: Cascade)
+  module    CourseModule?  @relation(fields: [module_id], references: [id], onDelete: Cascade)
+  creator   Profile?       @relation("AssessmentCreator", fields: [created_by], references: [id])
+  questions AssessmentQuestion[]
+  attempts  AssessmentAttempt[]
+
+  @@map("assessments")
+}
+
+// ====================================================================
+// 16. Assessment Questions
+// ====================================================================
+model AssessmentQuestion {
+  id            String   @id @default(uuid()) @db.Uuid
+  assessment_id String   @db.Uuid
+  question_text String
+  question_type String   // MULTIPLE_CHOICE, TRUE_FALSE, SHORT_ANSWER
+  points        Decimal  @default(1) @db.Decimal
+  sort_order    Int
+  created_at    DateTime @default(now()) @db.Timestamptz
+
+  assessment Assessment         @relation(fields: [assessment_id], references: [id], onDelete: Cascade)
+  choices    AssessmentChoice[]
+  answers    AssessmentAnswer[]
+
+  @@map("assessment_questions")
+}
+
+// ====================================================================
+// 17. Assessment Choices
+// ====================================================================
+model AssessmentChoice {
+  id          String  @id @default(uuid()) @db.Uuid
+  question_id String  @db.Uuid
+  choice_text String
+  is_correct  Boolean @default(false)
+  sort_order  Int
+
+  question AssessmentQuestion @relation(fields: [question_id], references: [id], onDelete: Cascade)
+  answers  AssessmentAnswer[]
+
+  @@map("assessment_choices")
+}
+
+// ====================================================================
+// 18. Assessment Attempts
+// ====================================================================
+model AssessmentAttempt {
+  id             String    @id @default(uuid()) @db.Uuid
+  assessment_id  String    @db.Uuid
+  trainee_id     String    @db.Uuid
+  attempt_number Int
+  score          Decimal?  @db.Decimal
+  passed         Boolean?
+  started_at     DateTime  @default(now()) @db.Timestamptz
+  submitted_at   DateTime? @db.Timestamptz
+
+  assessment Assessment       @relation(fields: [assessment_id], references: [id], onDelete: Cascade)
+  trainee    Trainee          @relation(fields: [trainee_id], references: [profile_id], onDelete: Cascade)
+  answers    AssessmentAnswer[]
+
+  @@map("assessment_attempts")
+}
+
+// ====================================================================
+// 19. Assessment Answers
+// ====================================================================
+model AssessmentAnswer {
+  id                 String    @id @default(uuid()) @db.Uuid
+  attempt_id         String    @db.Uuid
+  question_id        String    @db.Uuid
+  selected_choice_id String?   @db.Uuid
+  answer_text        String?
+  is_correct         Boolean?
+  points_earned      Decimal   @default(0) @db.Decimal
+  answered_at        DateTime  @default(now()) @db.Timestamptz
+
+  attempt        AssessmentAttempt  @relation(fields: [attempt_id], references: [id], onDelete: Cascade)
+  question       AssessmentQuestion @relation(fields: [question_id], references: [id], onDelete: Cascade)
+  selectedChoice AssessmentChoice?  @relation(fields: [selected_choice_id], references: [id])
+
+  @@map("assessment_answers")
+}
+
+// ====================================================================
+// 20. Grades
+// ====================================================================
+model Grade {
+  id            String    @id @default(uuid()) @db.Uuid
+  enrollment_id String    @db.Uuid
+  trainee_id    String    @db.Uuid
+  course_id     String    @db.Uuid
+  final_score   Decimal?  @db.Decimal
+  grade         String?
+  status        String    @default("PENDING")
+  remarks       String?
+  graded_by     String?   @db.Uuid
+  graded_at     DateTime? @db.Timestamptz
+  created_at    DateTime  @default(now()) @db.Timestamptz
+  updated_at    DateTime  @default(now()) @updatedAt @db.Timestamptz
+
+  enrollment Enrollment @relation(fields: [enrollment_id], references: [id], onDelete: Cascade)
+  trainee    Trainee    @relation(fields: [trainee_id], references: [profile_id], onDelete: Cascade)
+  course     Course     @relation("CourseGrades", fields: [course_id], references: [id], onDelete: Cascade)
+  grader     Profile?   @relation("Grader", fields: [graded_by], references: [id])
+
+  @@map("grades")
+}
+
+// ====================================================================
+// 21. Payments
+// ====================================================================
+model Payment {
+  id               String    @id @default(uuid()) @db.Uuid
+  trainee_id       String    @db.Uuid
+  enrollment_id    String?   @db.Uuid
+  amount           Decimal   @db.Decimal
+  payment_method   String    // GCASH, BANK_TRANSFER, MAYA, OTHER
+  reference_number String?   @unique
+  status           String    @default("PENDING") // PENDING, PROCESSING, PAID, FAILED, CANCELLED, REFUNDED
+  paid_at          DateTime? @db.Timestamptz
+  verified_by      String?   @db.Uuid
+  verified_at      DateTime? @db.Timestamptz
+  created_at       DateTime  @default(now()) @db.Timestamptz
+  updated_at       DateTime  @default(now()) @updatedAt @db.Timestamptz
+
+  trainee    Trainee     @relation(fields: [trainee_id], references: [profile_id], onDelete: Cascade)
+  enrollment Enrollment? @relation(fields: [enrollment_id], references: [id], onDelete: Cascade)
+  verifier   Profile?    @relation("PaymentVerifier", fields: [verified_by], references: [id])
+
+  @@map("payments")
+}
+
+// ====================================================================
+// 22. Certificates
+// ====================================================================
+model Certificate {
+  id                 String    @id @default(uuid()) @db.Uuid
+  trainee_id         String    @db.Uuid
+  course_id          String    @db.Uuid
+  enrollment_id      String?   @db.Uuid
+  certificate_number String?   @unique
+  issued_at          DateTime  @default(now()) @db.Timestamptz
+  expires_at         DateTime? @db.Timestamptz
+  file_url           String?
+  status             String    @default("ACTIVE")
+  issued_by          String?   @db.Uuid
+  created_at         DateTime  @default(now()) @db.Timestamptz
+
+  trainee    Trainee     @relation(fields: [trainee_id], references: [profile_id], onDelete: Cascade)
+  course     Course      @relation("CourseCertificates", fields: [course_id], references: [id], onDelete: Cascade)
+  enrollment Enrollment? @relation(fields: [enrollment_id], references: [id], onDelete: Cascade)
+  issuer     Profile?    @relation("CertificateIssuer", fields: [issued_by], references: [id])
+
+  @@map("certificates")
+}
+
+// ====================================================================
+// 23. Notifications
+// ====================================================================
+model Notification {
+  id           String   @id @default(uuid()) @db.Uuid
+  recipient_id String   @db.Uuid
+  title        String
+  message      String
+  type         String
+  is_read      Boolean  @default(false)
+  created_at   DateTime @default(now()) @db.Timestamptz
+
+  recipient Profile @relation(fields: [recipient_id], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+// ====================================================================
+// 24. Audit Logs
+// ====================================================================
+model AuditLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  actor_id    String?  @db.Uuid
+  action      String
+  entity_type String
+  entity_id   String?  @db.Uuid
+  old_values  Json?
+  new_values  Json?
+  ip_address  String?
+  user_agent  String?
+  created_at  DateTime @default(now()) @db.Timestamptz
+
+  actor Profile? @relation(fields: [actor_id], references: [id], onDelete: SetNull)
+
+  @@map("audit_logs")
+}
+
+// ====================================================================
+// 25. System Settings
+// ====================================================================
+model SystemSetting {
+  id          String   @id @default(uuid()) @db.Uuid
+  key         String?  @unique
+  value       Json
+  description String?
+  updated_by  String?  @db.Uuid
+  created_at  DateTime @default(now()) @db.Timestamptz
+  updated_at  DateTime @default(now()) @updatedAt @db.Timestamptz
+
+  updater Profile? @relation("SettingUpdater", fields: [updated_by], references: [id])
+
+  @@map("system_settings")
+}

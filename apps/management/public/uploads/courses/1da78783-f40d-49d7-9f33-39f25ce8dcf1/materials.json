@@ -1,0 +1,41 @@
+[
+  {
+    "id": "mat_1790782238281_0nw8o",
+    "courseId": "1da78783-f40d-49d7-9f33-39f25ce8dcf1",
+    "title": "NEWSIM POLICY",
+    "description": "Automatically attached document file",
+    "materialType": "DOCUMENT",
+    "fileName": "NEWSIM-POLICY.docx",
+    "fileSize": 17826,
+    "fileUrl": "/uploads/courses/1da78783-f40d-49d7-9f33-39f25ce8dcf1/1790782238275_NEWSIM-POLICY.docx",
+    "externalUrl": "",
+    "uploadedBy": "newsim.admin@gmail.com",
+    "createdAt": "2026-09-30T15:30:38.281Z"
+  },
+  {
+    "id": "mat_1790572319949_v1knq",
+    "courseId": "1da78783-f40d-49d7-9f33-39f25ce8dcf1",
+    "title": "reflectionhehe",
+    "description": "Automatically attached document file",
+    "materialType": "DOCUMENT",
+    "fileName": "reflectionhehe.docx",
+    "fileSize": 10473,
+    "fileUrl": "/uploads/courses/1da78783-f40d-49d7-9f33-39f25ce8dcf1/1790572319946_reflectionhehe.docx",
+    "externalUrl": "",
+    "uploadedBy": "newsim.admin@gmail.com",
+    "createdAt": "2026-09-28T05:11:59.949Z"
+  },
+  {
+    "id": "mat_1790436395197_bwo74",
+    "courseId": "1da78783-f40d-49d7-9f33-39f25ce8dcf1",
+    "title": "PrintCOR",
+    "description": "Automatically attached syllabus file",
+    "materialType": "SYLLABUS",
+    "fileName": "PrintCOR.pdf",
+    "fileSize": 223763,
+    "fileUrl": "/uploads/courses/1da78783-f40d-49d7-9f33-39f25ce8dcf1/1790436395190_PrintCOR.pdf",
+    "externalUrl": "",
+    "uploadedBy": "newsim.admin@gmail.com",
+    "createdAt": "2026-09-26T15:26:35.198Z"
+  }
+]

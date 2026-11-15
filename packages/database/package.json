@@ -1,0 +1,16 @@
+{
+  "name": "@newsim/database",
+  "version": "1.0.0",
+  "private": true,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@newsim/types": "*",
+    "@prisma/client": "^7.9.1",
+    "@supabase/supabase-js": "^2.112.4",
+    "bcrypt": "^6.0.0"
+  },
+  "devDependencies": {
+    "@types/bcrypt": "^6.0.0"
+  }
+}

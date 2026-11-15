@@ -1,0 +1,124 @@
+-- ============================================================================
+-- NEWSIM RBAC ROLE PERMISSIONS ALIGNMENT MIGRATION
+-- Aligns public.role_permissions with @newsim/utils module-scoped RBAC catalog
+-- and enforces strict financial isolation for SUPER_ADMIN.
+-- ============================================================================
+
+BEGIN;
+
+-- 1. Remove obsolete/out-of-scope permission tokens per role
+DELETE FROM public.role_permissions
+WHERE (
+  role = 'SUPER_ADMIN' AND permission NOT IN (
+    'ADMIN_VIEW', 'ADMIN_CREATE', 'ADMIN_UPDATE', 'ADMIN_DELETE',
+    'INSTRUCTOR_VIEW', 'INSTRUCTOR_CREATE', 'INSTRUCTOR_UPDATE', 'INSTRUCTOR_DELETE',
+    'TRAINEE_VIEW', 'TRAINEE_CREATE', 'TRAINEE_UPDATE', 'TRAINEE_DELETE',
+    'REPORT_VIEW', 'REPORT_EXPORT',
+    'SECURITY_VIEW', 'SESSION_REVOKE',
+    'AUDIT_LOG_VIEW',
+    'ROLE_PERMISSION_VIEW', 'ROLE_PERMISSION_UPDATE',
+    'SYSTEM_SETTINGS_VIEW', 'SYSTEM_SETTINGS_UPDATE'
+  )
+) OR (
+  role = 'ADMIN' AND permission NOT IN (
+    'INSTRUCTOR_VIEW', 'REPORT_VIEW',
+    'COURSE_VIEW', 'COURSE_MANAGE',
+    'ENROLLMENT_VIEW', 'ENROLLMENT_MANAGE',
+    'ASSESSMENT_VIEW', 'ASSESSMENT_MANAGE',
+    'ATTENDANCE_VIEW', 'ATTENDANCE_MANAGE',
+    'SCHEDULE_VIEW', 'SCHEDULE_MANAGE',
+    'LEAVE_VIEW', 'LEAVE_MANAGE',
+    'PAYMENT_VIEW', 'PAYMENT_VERIFY',
+    'CERTIFICATE_VIEW', 'CERTIFICATE_MANAGE'
+  )
+) OR (
+  role = 'INSTRUCTOR' AND permission NOT IN (
+    'TRAINEE_VIEW', 'COURSE_VIEW', 'ASSESSMENT_VIEW',
+    'ATTENDANCE_VIEW', 'SCHEDULE_VIEW',
+    'MATERIAL_MANAGE', 'ASSESSMENT_GRADE',
+    'GRADE_VIEW', 'GRADE_FINALIZE',
+    'ATTENDANCE_RECORD', 'LEAVE_REQUEST'
+  )
+) OR (
+  role = 'TRAINEE' AND permission NOT IN (
+    'COURSE_VIEW', 'ENROLLMENT_VIEW', 'ASSESSMENT_VIEW',
+    'ATTENDANCE_VIEW', 'SCHEDULE_VIEW',
+    'PAYMENT_VIEW', 'CERTIFICATE_VIEW', 'GRADE_VIEW'
+  )
+);
+
+-- 2. Seed module-scoped default permissions per role idempotently
+INSERT INTO public.role_permissions (role, permission) VALUES
+  -- SUPER_ADMIN (Governance, Security & Account Management only; financial access excluded)
+  ('SUPER_ADMIN', 'ADMIN_VIEW'),
+  ('SUPER_ADMIN', 'ADMIN_CREATE'),
+  ('SUPER_ADMIN', 'ADMIN_UPDATE'),
+  ('SUPER_ADMIN', 'ADMIN_DELETE'),
+  ('SUPER_ADMIN', 'INSTRUCTOR_VIEW'),
+  ('SUPER_ADMIN', 'INSTRUCTOR_CREATE'),
+  ('SUPER_ADMIN', 'INSTRUCTOR_UPDATE'),
+  ('SUPER_ADMIN', 'INSTRUCTOR_DELETE'),
+  ('SUPER_ADMIN', 'TRAINEE_VIEW'),
+  ('SUPER_ADMIN', 'TRAINEE_CREATE'),
+  ('SUPER_ADMIN', 'TRAINEE_UPDATE'),
+  ('SUPER_ADMIN', 'TRAINEE_DELETE'),
+  ('SUPER_ADMIN', 'REPORT_VIEW'),
+  ('SUPER_ADMIN', 'REPORT_EXPORT'),
+  ('SUPER_ADMIN', 'SECURITY_VIEW'),
+  ('SUPER_ADMIN', 'SESSION_REVOKE'),
+  ('SUPER_ADMIN', 'AUDIT_LOG_VIEW'),
+  ('SUPER_ADMIN', 'ROLE_PERMISSION_VIEW'),
+  ('SUPER_ADMIN', 'ROLE_PERMISSION_UPDATE'),
+  ('SUPER_ADMIN', 'SYSTEM_SETTINGS_VIEW'),
+  ('SUPER_ADMIN', 'SYSTEM_SETTINGS_UPDATE'),
+
+  -- ADMIN (Training Center Operational Modules + Billing Scoped)
+  ('ADMIN', 'INSTRUCTOR_VIEW'),
+  ('ADMIN', 'REPORT_VIEW'),
+  ('ADMIN', 'COURSE_VIEW'),
+  ('ADMIN', 'COURSE_MANAGE'),
+  ('ADMIN', 'ENROLLMENT_VIEW'),
+  ('ADMIN', 'ENROLLMENT_MANAGE'),
+  ('ADMIN', 'ASSESSMENT_VIEW'),
+  ('ADMIN', 'ASSESSMENT_MANAGE'),
+  ('ADMIN', 'ATTENDANCE_VIEW'),
+  ('ADMIN', 'ATTENDANCE_MANAGE'),
+  ('ADMIN', 'SCHEDULE_VIEW'),
+  ('ADMIN', 'SCHEDULE_MANAGE'),
+  ('ADMIN', 'LEAVE_VIEW'),
+  ('ADMIN', 'LEAVE_MANAGE'),
+  ('ADMIN', 'PAYMENT_VIEW'),
+  ('ADMIN', 'PAYMENT_VERIFY'),
+  ('ADMIN', 'CERTIFICATE_VIEW'),
+  ('ADMIN', 'CERTIFICATE_MANAGE'),
+
+  -- INSTRUCTOR (Faculty Instruction, Grading, Attendance, Materials & Leaves)
+  ('INSTRUCTOR', 'TRAINEE_VIEW'),
+  ('INSTRUCTOR', 'COURSE_VIEW'),
+  ('INSTRUCTOR', 'ASSESSMENT_VIEW'),
+  ('INSTRUCTOR', 'ATTENDANCE_VIEW'),
+  ('INSTRUCTOR', 'SCHEDULE_VIEW'),
+  ('INSTRUCTOR', 'MATERIAL_MANAGE'),
+  ('INSTRUCTOR', 'ASSESSMENT_GRADE'),
+  ('INSTRUCTOR', 'GRADE_VIEW'),
+  ('INSTRUCTOR', 'GRADE_FINALIZE'),
+  ('INSTRUCTOR', 'ATTENDANCE_RECORD'),
+  ('INSTRUCTOR', 'LEAVE_REQUEST'),
+
+  -- TRAINEE (Seafarer LMS, Assessments, Grades, Attendance, Schedules, Payments, Certificates)
+  ('TRAINEE', 'COURSE_VIEW'),
+  ('TRAINEE', 'ENROLLMENT_VIEW'),
+  ('TRAINEE', 'ASSESSMENT_VIEW'),
+  ('TRAINEE', 'ATTENDANCE_VIEW'),
+  ('TRAINEE', 'SCHEDULE_VIEW'),
+  ('TRAINEE', 'PAYMENT_VIEW'),
+  ('TRAINEE', 'CERTIFICATE_VIEW'),
+  ('TRAINEE', 'GRADE_VIEW')
+ON CONFLICT (role, permission) DO NOTHING;
+
+-- 3. Normalize legacy ATTENDANCE_MONITOR token on per-admin overrides
+UPDATE public.admins
+SET permissions = array_replace(permissions, 'ATTENDANCE_MONITOR', 'ATTENDANCE_MANAGE')
+WHERE permissions @> ARRAY['ATTENDANCE_MONITOR'];
+
+COMMIT;
