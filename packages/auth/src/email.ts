@@ -49,11 +49,26 @@ export const sendMfaEmail = async (to: string, code: string) => {
   }
 };
 
-export const sendInvitationEmail = async (to: string, name: string, email: string, confirmUrl: string, roleLabel: string = 'administrator') => {
+function resolveInvitationPortalName(roleLabel: string): string {
+  const normalized = roleLabel.trim().toLowerCase();
+  if (normalized === 'instructor') return 'NEWSIM Instructor Portal';
+  if (normalized === 'trainee') return 'NEWSIM Trainee Portal';
+  return 'NEWSIM Management Portal';
+}
+
+export const sendInvitationEmail = async (
+  to: string,
+  name: string,
+  email: string,
+  confirmUrl: string,
+  roleLabel: string = 'administrator'
+): Promise<{ success: boolean; mocked?: boolean; error?: string }> => {
+  const portalName = resolveInvitationPortalName(roleLabel);
+
   if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
     console.log('\n=============================================');
     console.log(`[MOCK EMAIL] To: ${to}`);
-    console.log(`[MOCK EMAIL] Subject: Welcome to NEWSIM Management Portal`);
+    console.log(`[MOCK EMAIL] Subject: Confirm Your ${portalName} Account`);
     console.log(`[MOCK EMAIL] Name: ${name}`);
     console.log(`[MOCK EMAIL] Email: ${email}`);
     console.log(`[MOCK EMAIL] Role: ${roleLabel}`);
@@ -66,13 +81,13 @@ export const sendInvitationEmail = async (to: string, name: string, email: strin
     await transporter.sendMail({
       from: `"NEWSIM Security" <${process.env.SMTP_USER}>`,
       to,
-      subject: 'Welcome to NEWSIM Management Portal - Action Required',
-      text: `Hello ${name},\n\nA ${roleLabel} account has been created for you.\n\nEmail: ${email}\n\nPlease confirm your account by clicking the link below:\n${confirmUrl}\n\nAfter confirmation, you can log in to the portal.`,
+      subject: `Confirm Your ${portalName} Account - Action Required`,
+      text: `Hello ${name},\n\nA ${roleLabel} account has been created for you on the ${portalName}.\n\nEmail: ${email}\n\nPlease confirm your account by clicking the link below:\n${confirmUrl}\n\nOnce confirmed, you can log in to the ${portalName}.`,
       html: `
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;">
-          <h2 style="color: #0f172a;">NEWSIM Management Portal</h2>
+          <h2 style="color: #0f172a;">${portalName}</h2>
           <p>Hello <strong>${name}</strong>,</p>
-          <p>A ${roleLabel} account has been created for you. You can use your email address to access the portal:</p>
+          <p>A ${roleLabel} account has been created for you. Click the confirmation button below to verify your email and activate access to the <strong>${portalName}</strong>:</p>
           
           <div style="background-color: #f1f5f9; padding: 15px; border-radius: 4px; margin: 20px 0;">
             <p style="margin: 0;"><strong>Email:</strong> ${email}</p>
@@ -92,7 +107,7 @@ export const sendInvitationEmail = async (to: string, name: string, email: strin
             </tr>
           </table>
           
-          <p style="color: #64748b; font-size: 14px;">Once confirmed, you can log in to the portal.</p>
+          <p style="color: #64748b; font-size: 14px;">Once confirmed, you can log in to the ${portalName} using your assigned credentials.</p>
           <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 20px 0;" />
           <p style="color: #94a3b8; font-size: 12px;">This is an automated message. Please do not reply directly to this email.</p>
         </div>
@@ -101,7 +116,10 @@ export const sendInvitationEmail = async (to: string, name: string, email: strin
     return { success: true };
   } catch (error) {
     console.error('Failed to send invitation email:', error);
-    return { success: false, error };
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
 };
 

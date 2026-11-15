@@ -4,7 +4,7 @@ import React, { useState, useRef, useEffect } from "react";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Eye, EyeOff, ShieldCheck, User, Lock, AlertCircle, Anchor, KeyRound, Copy, Check, Shield } from "lucide-react";
+import { Eye, EyeOff, ShieldCheck, User, Lock, AlertCircle, CheckCircle2, Anchor, KeyRound, Copy, Check, Shield } from "lucide-react";
 import Link from "next/link";
 import { NeuralAccessLogin, NeuralInput, Button, Checkbox, WaveBackground, MercuryBackground, NeuralButton, OtpInput, type OtpInputHandle, HoneypotField, CookiePreferencesTrigger } from "@newsim/ui";
 import QRCode from "react-qr-code";
@@ -29,6 +29,7 @@ export default function InstructorLoginClient() {
   const [authState, setAuthState] = useState<AuthState>("LOGIN");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   
   // Credentials
   const [identifier, setIdentifier] = useState("");
@@ -38,12 +39,26 @@ export default function InstructorLoginClient() {
 
   useEffect(() => {
     const errorParam = searchParams.get("error");
+    const messageParam = searchParams.get("message");
+
+    if (messageParam === "account_confirmed") {
+      setSuccessMessage("Your account has been confirmed! You can now sign in with your credentials.");
+    } else if (messageParam === "already_confirmed") {
+      setSuccessMessage("Your account is already confirmed. Please sign in to continue.");
+    }
+
     if (errorParam === "inactivity" || errorParam === "session_expired_inactivity") {
       setError("Your session has expired due to inactivity. Please log in again.");
     } else if (errorParam === "session_expired") {
       setError("Your session has expired. Please log in again.");
-    } else if (errorParam === "unauthorized_portal") {
+    } else if (errorParam === "unauthorized_portal" || errorParam === "portal_forbidden") {
       setError("You are not authorized to access the Instructor Portal.");
+    } else if (errorParam === "invalid_token") {
+      setError("This confirmation link is invalid. Please request a new confirmation email from your Super Admin.");
+    } else if (errorParam === "expired_token") {
+      setError("This confirmation link has expired. Please ask your Super Admin to resend the confirmation email.");
+    } else if (errorParam === "activation_failed") {
+      setError("We could not activate your account automatically. Please contact your Super Admin for assistance.");
     }
   }, [searchParams]);
 
@@ -438,6 +453,12 @@ export default function InstructorLoginClient() {
             className="w-full"
           >
             <form onSubmit={handleLogin} className="space-y-5">
+              {successMessage && (
+                <div className="p-3.5 rounded-lg bg-emerald-50 border border-emerald-200 flex items-start gap-2.5 text-sm text-emerald-800">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                  <span>{successMessage}</span>
+                </div>
+              )}
               {error && (
                 <motion.div 
                   initial={{ opacity: 0, height: 0 }} 

@@ -105,23 +105,36 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         token_hash: token,
         status: 'PENDING',
         expires_at: expiresAt.toISOString(),
+        invited_by: auth.user.id,
       });
 
       if (inviteError) {
-        return NextResponse.json({ success: false, error: 'Failed to generate invitation token.' }, { status: 400 });
+        return NextResponse.json(
+          { success: false, error: `Failed to generate invitation token: ${inviteError.message}` },
+          { status: 500 }
+        );
       }
 
       const baseUrl = resolveSafeAppOrigin(req, 'http://localhost:3000');
       const confirmUrl = `${baseUrl}/api/auth/confirm?token=${token}`;
       
       const { sendInvitationEmail } = await import('@newsim/auth');
-      const { error: reinviteError } = await sendInvitationEmail(profile.email, `${profile.first_name} ${profile.last_name}`, profile.email, confirmUrl, 'instructor');
+      const emailResult = await sendInvitationEmail(
+        profile.email,
+        `${profile.first_name} ${profile.last_name}`,
+        profile.email,
+        confirmUrl,
+        'instructor'
+      );
 
-      if (reinviteError) {
-        return NextResponse.json({ success: false, error: String(reinviteError) }, { status: 400 });
+      if (!emailResult?.success) {
+        return NextResponse.json(
+          { success: false, error: emailResult?.error || 'Failed to resend confirmation email. Please check SMTP configuration.' },
+          { status: 502 }
+        );
       }
 
-      return NextResponse.json({ success: true, message: 'Verification email resent successfully.' });
+      return NextResponse.json({ success: true, message: 'Confirmation email resent successfully.' });
     }
 
     if (newStatus !== profile.status) {

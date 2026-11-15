@@ -125,6 +125,10 @@ export default function TraineeLoginClient() {
 
     if (msg === "registration_successful" || msg === "registered") {
       setSuccessMessage("Registration successful! Your trainee account is ready. Please sign in to access your portal.");
+    } else if (msg === "account_confirmed") {
+      setSuccessMessage("Your account has been successfully confirmed. You may now sign in.");
+    } else if (msg === "already_confirmed") {
+      setSuccessMessage("Your account is already confirmed. Please sign in.");
     } else if (msg === "account_exists") {
       setSuccessMessage("Your account already exists. Please sign in with your credentials or Google.");
     }
@@ -140,9 +144,14 @@ export default function TraineeLoginClient() {
       session_expired: "Your session has expired. Please log in again.",
       account_already_exists: "An account with this email already exists. Please sign in below.",
       missing_code: "Sign-in could not be completed. Please try again.",
+      oauth_pkce_missing: "Your browser verification cookie expired or was cleared before returning from Google. Ensure cookies are enabled and avoid in-app browsers, then try again.",
       oauth_callback_failed: "Unable to complete sign-in. Please try again.",
       google_signin_failed: "Unable to sign in with Google. Please try again.",
       facebook_signin_failed: "Unable to sign in with Facebook. Please try again.",
+      email_dispatch_failed: "Unable to dispatch your verification email. Please try again.",
+      invalid_token: "The confirmation link is invalid or has already been used.",
+      expired_token: "The confirmation link has expired. Please ask an administrator to resend your invitation.",
+      activation_failed: "Failed to activate your account. Please contact the administrator.",
       profile_creation_failed: "Your NEWSIM profile could not be loaded. Please contact the administrator.",
       profile_not_found: "Your NEWSIM profile could not be loaded. Please contact the administrator.",
       unauthorized_portal: "Your account is not authorized to access the Trainee Portal.",
@@ -407,12 +416,17 @@ export default function TraineeLoginClient() {
 
   const handleSocialLogin = async (provider: 'Google' = 'Google') => {
     if (socialClickLockRef.current) return;
+    if (typeof navigator !== "undefined" && /FB_IAB|FBAN|FBAV|Instagram|Line\/|MicroMessenger|;\s*wv\)/i.test(navigator.userAgent)) {
+      setError("Google Sign-In is blocked inside embedded in-app browsers (such as Facebook or Messenger). Please open this page in Chrome or Safari and try again.");
+      return;
+    }
     socialClickLockRef.current = true;
     try {
       setError(null);
       setAuthState("LOADING");
 
-      document.cookie = "newsim_oauth_flow=login; path=/; max-age=600; SameSite=Lax";
+      const secureAttr = typeof window !== "undefined" && window.location.protocol === "https:" ? "; Secure" : "";
+      document.cookie = `newsim_oauth_flow=login; path=/; max-age=600; SameSite=Lax${secureAttr}`;
 
       const supabase = createClient();
       const redirectUrl = `${window.location.origin}/auth/callback?flow=login`;

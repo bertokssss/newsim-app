@@ -213,12 +213,28 @@ export async function POST(req: NextRequest) {
     });
 
     if (inviteError) {
-      console.warn("Failed to create invitation record:", inviteError);
-      // Non-fatal, but admin won't be able to confirm easily. Should probably handle this.
+      await supabaseAdmin.from('admins').delete().eq('profile_id', authData.user.id);
+      await supabaseAdmin.from('profiles').delete().eq('id', authData.user.id);
+      await supabaseAdmin.auth.admin.deleteUser(authData.user.id);
+      throw new Error(`Failed to create confirmation invitation: ${inviteError.message}`);
     }
 
     const confirmUrl = `${baseUrl}/api/auth/confirm?token=${token}`;
-    await sendInvitationEmail(cleanEmail, `${firstName.trim()} ${lastName.trim()}`, cleanEmail, confirmUrl, 'administrator');
+    const emailResult = await sendInvitationEmail(
+      cleanEmail,
+      `${firstName.trim()} ${lastName.trim()}`,
+      cleanEmail,
+      confirmUrl,
+      'administrator'
+    );
+
+    if (!emailResult?.success) {
+      await supabaseAdmin.from('invitations').delete().eq('token_hash', token);
+      await supabaseAdmin.from('admins').delete().eq('profile_id', authData.user.id);
+      await supabaseAdmin.from('profiles').delete().eq('id', authData.user.id);
+      await supabaseAdmin.auth.admin.deleteUser(authData.user.id);
+      throw new Error(emailResult?.error || 'Failed to send confirmation email. Account creation was rolled back.');
+    }
 
     logAuditEvent({
       actorId: auth.user.id,
@@ -248,18 +264,21 @@ export async function POST(req: NextRequest) {
       },
     }).catch(() => {});
 
-    return NextResponse.json({
-      success: true,
-      message: 'Admin account created and activated successfully.',
-      admin: {
-        id: authData.user.id,
-        email: cleanEmail,
-        username: cleanUsername,
-        name: `${firstName.trim()} ${lastName.trim()}`,
-        position: position.trim(),
-        status: 'ACTIVE',
+    return NextResponse.json(
+      {
+        success: true,
+        message: 'Admin account created. Confirmation email sent.',
+        admin: {
+          id: authData.user.id,
+          email: cleanEmail,
+          username: cleanUsername,
+          name: `${firstName.trim()} ${lastName.trim()}`,
+          position: position.trim(),
+          status: 'PENDING',
+        },
       },
-    });
+      { status: 201 }
+    );
   } catch (error: any) {
     console.error('Admin creation error:', error);
     return NextResponse.json(

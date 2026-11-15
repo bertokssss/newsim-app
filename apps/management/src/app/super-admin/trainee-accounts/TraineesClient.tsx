@@ -157,7 +157,7 @@ export default function TraineesClient() {
       setCreateError('Please enter a valid email address.');
       return;
     }
-    const passwordVal = validatePassword(formData.password, 8);
+    const passwordVal = validatePassword(formData.password, 12);
     if (!passwordVal.isValid) {
       setCreateError(`Password does not meet security requirements: missing ${passwordVal.errors.join(', ')}.`);
       return;
@@ -1070,7 +1070,7 @@ export default function TraineesClient() {
 
                     <div className="p-3 rounded-xl bg-sky-500/10 border border-sky-400/30 text-sky-700 dark:text-sky-300 text-xs">
                       <Mail className="w-3.5 h-3.5 inline mr-1.5" />
-                      An invitation email with a <strong>"Confirm It's Me"</strong> button will be sent to <strong>{formData.email}</strong>. The account will automatically activate once the email is verified.
+                      An invitation email with a <strong>"Confirm Account"</strong> button will be sent to <strong>{formData.email}</strong>. The account will automatically activate once the email is verified.
                     </div>
                   </div>
 
@@ -1098,7 +1098,7 @@ export default function TraineesClient() {
                     The trainee account has been created with <strong>PENDING</strong> status. An invitation email has been sent to <strong>{formData.email}</strong>.
                   </p>
                   <p className="text-xs text-slate-500 dark:text-[#CBD5E1]">
-                    The trainee must click <strong>"Confirm It's Me"</strong> in their email to verify ownership and activate their account.
+                    The trainee must click <strong>"Confirm Account"</strong> in their email to verify ownership and activate their account.
                   </p>
                   <Button onClick={closeCreateModal} className="w-full cursor-pointer">
                     Done

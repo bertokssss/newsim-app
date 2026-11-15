@@ -605,23 +605,24 @@ export async function POST(request: NextRequest) {
     });
 
     if (inviteError) {
-      console.warn('[TRAINEE INVITATION] Failed to create invitation record:', inviteError);
+      throw new Error(`Failed to create confirmation invitation: ${inviteError.message}`);
     }
 
     const baseUrl = resolveSafeAppOrigin(request, 'http://localhost:3000');
     const confirmUrl = `${baseUrl}/api/auth/confirm?token=${token}`;
 
-    try {
-      const { sendInvitationEmail } = await import('@newsim/auth');
-      await sendInvitationEmail(
-        cleanEmail,
-        `${cleanFirstName} ${cleanLastName}`,
-        cleanEmail,
-        confirmUrl,
-        'trainee'
-      );
-    } catch (emailErr) {
-      console.warn('[TRAINEE INVITATION] Failed to send confirmation email:', emailErr);
+    const { sendInvitationEmail } = await import('@newsim/auth');
+    const emailResult = await sendInvitationEmail(
+      cleanEmail,
+      `${cleanFirstName} ${cleanLastName}`,
+      cleanEmail,
+      confirmUrl,
+      'trainee'
+    );
+
+    if (!emailResult?.success) {
+      await supabaseAdmin.from('invitations').delete().eq('token_hash', token);
+      throw new Error(emailResult?.error || 'Failed to send confirmation email. Account creation was rolled back.');
     }
 
     /*

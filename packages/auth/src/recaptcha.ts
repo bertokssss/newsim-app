@@ -23,9 +23,9 @@ export interface VerifyRecaptchaOptions {
 
 function getSecretKey(mode: 'v2' | 'v3' | 'auto' = 'auto'): string {
   if (mode === 'v2') {
-    return process.env.RECAPTCHA_V2_SECRET_KEY || process.env.RECAPTCHA_SECRET_KEY || '';
+    return (process.env.RECAPTCHA_V2_SECRET_KEY || process.env.RECAPTCHA_SECRET_KEY || '').trim();
   }
-  return process.env.RECAPTCHA_SECRET_KEY || process.env.RECAPTCHA_V2_SECRET_KEY || '';
+  return (process.env.RECAPTCHA_SECRET_KEY || process.env.RECAPTCHA_V2_SECRET_KEY || '').trim();
 }
 
 /**

@@ -77,6 +77,7 @@ export default function InstructorsClient() {
   const [createError, setCreateError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [actionFeedback, setActionFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   const formScrollRef = useRef<HTMLDivElement>(null);
   const errorRef = useRef<HTMLDivElement>(null);
@@ -187,7 +188,7 @@ export default function InstructorsClient() {
       setCreateError('Please enter a valid email address.');
       return;
     }
-    const passwordVal = validatePassword(createForm.password, 8);
+    const passwordVal = validatePassword(createForm.password, 12);
     if (!passwordVal.isValid) {
       setCreateError(`Password does not meet security requirements: missing ${passwordVal.errors.join(', ')}.`);
       return;
@@ -227,7 +228,10 @@ export default function InstructorsClient() {
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
-        setCreateError(data.error + (data.details ? ` (${data.details})` : '') || 'Failed to create instructor account.');
+        setCreateError(
+          (data.error || 'Failed to create instructor account.') +
+            (data.details ? ` (${data.details})` : '')
+        );
         setCreateLoading(false);
         return;
       }
@@ -242,6 +246,7 @@ export default function InstructorsClient() {
   };
 
   const handleResendInvitation = async (instructorId: string) => {
+    setActionFeedback(null);
     try {
       const res = await fetch(`/api/super-admin/instructors/${instructorId}`, {
         method: 'PATCH',
@@ -249,11 +254,24 @@ export default function InstructorsClient() {
         body: JSON.stringify({ action: 'RESEND_INVITATION' }),
       });
       const data = await res.json();
-      if (data.success) {
+      if (res.ok && data.success) {
+        setActionFeedback({
+          type: 'success',
+          message: data.message || 'Confirmation email resent successfully.',
+        });
         fetchAdmins();
+      } else {
+        setActionFeedback({
+          type: 'error',
+          message: data.error || 'Failed to resend confirmation email.',
+        });
       }
     } catch (err) {
       console.error('Failed to resend invitation', err);
+      setActionFeedback({
+        type: 'error',
+        message: 'Network error while resending confirmation email.',
+      });
     }
   };
 
@@ -304,6 +322,33 @@ export default function InstructorsClient() {
           </button>
         </div>
       </motion.div>
+
+      {actionFeedback && (
+        <div
+          className={`flex items-center justify-between gap-3 px-4 py-3 rounded-xl border text-xs font-medium ${
+            actionFeedback.type === 'success'
+              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
+              : 'bg-rose-500/10 border-rose-500/30 text-rose-700 dark:text-rose-300'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {actionFeedback.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
+            ) : (
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+            )}
+            <span>{actionFeedback.message}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setActionFeedback(null)}
+            className="p-1 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer"
+            aria-label="Dismiss message"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Filter and Search Bar */}
       <motion.div
@@ -601,7 +646,7 @@ export default function InstructorsClient() {
                     </div>
                     <div>
                       <h3 className="text-lg font-bold text-slate-900 dark:text-[#F7F9FC] font-heading">Create Instructor</h3>
-                      <p className="text-sm text-slate-500 dark:text-[#CBD5E1] mt-0.5">Enter the new instructor's information. They'll receive an email to verify and set their password.</p>
+                      <p className="text-sm text-slate-500 dark:text-[#CBD5E1] mt-0.5">Enter the new instructor's information and initial password. They'll receive a confirmation email to verify ownership and activate their account.</p>
                     </div>
                   </div>
 
@@ -799,7 +844,7 @@ export default function InstructorsClient() {
 
                   <div className="p-3 rounded-xl bg-sky-500/10 border border-sky-400/30 text-sky-700 dark:text-sky-300 text-xs">
                     <Mail className="w-3.5 h-3.5 inline mr-1.5" />
-                    An invitation email with a <strong>"Confirm It's Me"</strong> button will be sent to <strong>{createForm.email}</strong>. The account will automatically activate once the email is verified.
+                    A confirmation email with a <strong>"Confirm Account"</strong> button will be sent to <strong>{createForm.email}</strong>. The account will automatically activate once the email is verified.
                   </div>
 
                   <div className="flex justify-between gap-3 pt-8 mt-10 border-t border-slate-200 dark:border-slate-800">
@@ -822,10 +867,10 @@ export default function InstructorsClient() {
                   </div>
                   <h4 className="text-base font-bold text-slate-900 dark:text-[#F7F9FC]">Account Created & Invitation Sent</h4>
                   <p className="text-xs text-slate-600 dark:text-[#CBD5E1]">
-                    The instructor account has been created with <strong>PENDING</strong> status. An invitation email has been sent to <strong>{createForm.email}</strong>.
+                    The instructor account has been created with <strong>PENDING</strong> status. A confirmation email has been sent to <strong>{createForm.email}</strong>.
                   </p>
                   <p className="text-xs text-slate-500 dark:text-[#CBD5E1]">
-                    The instructor must click <strong>"Confirm It's Me"</strong> in their email to verify ownership, set their password, and activate their account.
+                    The instructor must click <strong>"Confirm Account"</strong> in their email to verify ownership and activate their account.
                   </p>
                   <Button onClick={() => setIsCreateOpen(false)} className="w-full cursor-pointer">
                     Done

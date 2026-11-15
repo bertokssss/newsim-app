@@ -137,7 +137,20 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       const confirmUrl = `${baseUrl}/api/auth/confirm?token=${token}`;
       
       const { sendInvitationEmail } = await import('@newsim/auth');
-      await sendInvitationEmail(admin.email, `${admin.first_name} ${admin.last_name}`, admin.email, confirmUrl, 'administrator');
+      const emailResult = await sendInvitationEmail(
+        admin.email,
+        `${admin.first_name} ${admin.last_name}`,
+        admin.email,
+        confirmUrl,
+        'administrator'
+      );
+
+      if (!emailResult?.success) {
+        return NextResponse.json(
+          { success: false, error: emailResult?.error || 'Failed to send confirmation email. Please check SMTP configuration.' },
+          { status: 502 }
+        );
+      }
 
       logAuditEvent({
         actorId: auth.user.id,

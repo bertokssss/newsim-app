@@ -26,11 +26,19 @@ export async function GET(req: NextRequest) {
       return NextResponse.redirect(`${baseUrl}/login?error=invalid_token`);
     }
 
-    let targetUrl = baseUrl;
+    const normalizedBaseUrl = baseUrl.replace(/\/+$/, '');
+    const fallbackOriginFor = (portal: 'instructor' | 'trainee') =>
+      normalizedBaseUrl.includes('newsim-management.vercel.app')
+        ? normalizedBaseUrl.replace('newsim-management.vercel.app', `newsim-${portal}.vercel.app`)
+        : portal === 'instructor'
+          ? 'http://localhost:3001'
+          : 'http://localhost:3002';
+
+    let targetUrl = normalizedBaseUrl;
     if (invitation.role?.toUpperCase() === 'INSTRUCTOR') {
-      targetUrl = process.env.NEXT_PUBLIC_INSTRUCTOR_URL || 'http://localhost:3001';
+      targetUrl = (process.env.NEXT_PUBLIC_INSTRUCTOR_URL || fallbackOriginFor('instructor')).replace(/\/+$/, '');
     } else if (invitation.role?.toUpperCase() === 'TRAINEE') {
-      targetUrl = process.env.NEXT_PUBLIC_TRAINEE_URL || 'http://localhost:3002';
+      targetUrl = (process.env.NEXT_PUBLIC_TRAINEE_URL || fallbackOriginFor('trainee')).replace(/\/+$/, '');
     }
 
     if (invitation.status === 'ACCEPTED' || invitation.status === 'accepted') {
@@ -41,31 +49,44 @@ export async function GET(req: NextRequest) {
       return NextResponse.redirect(`${targetUrl}/login?error=expired_token`);
     }
 
-    // Update profile status to ACTIVE
+    const escapedEmail = invitation.email.trim().replace(/[\\%_]/g, '\\$&');
+
+    // Update profile status to ACTIVE (case-insensitive match, never mark ACCEPTED if profile is missing)
     const { data: updatedProfile, error: profileError } = await supabaseAdmin
       .from('profiles')
       .update({ status: 'ACTIVE' })
-      .eq('email', invitation.email)
+      .ilike('email', escapedEmail)
       .select('id')
       .maybeSingle();
 
-    if (profileError) {
-      console.error('Error activating profile:', profileError);
+    if (profileError || !updatedProfile) {
+      console.error(
+        'Error activating profile:',
+        profileError || `No profile found for invitation email ${invitation.email}`
+      );
       return NextResponse.redirect(`${targetUrl}/login?error=activation_failed`);
     }
 
-    if (invitation.role?.toUpperCase() === 'TRAINEE' && updatedProfile) {
-      await supabaseAdmin
+    if (invitation.role?.toUpperCase() === 'TRAINEE') {
+      const { error: traineeUpdateError } = await supabaseAdmin
         .from('trainees')
         .update({ enrollment_status: 'ACTIVE' })
         .eq('profile_id', updatedProfile.id);
+      if (traineeUpdateError) {
+        console.error('Error activating trainee enrollment status:', traineeUpdateError);
+      }
     }
 
     // Update invitation status to ACCEPTED
-    await supabaseAdmin
+    const { error: inviteAcceptError } = await supabaseAdmin
       .from('invitations')
       .update({ status: 'ACCEPTED', accepted_at: new Date().toISOString() })
       .eq('id', invitation.id);
+
+    if (inviteAcceptError) {
+      console.error('Error updating invitation status:', inviteAcceptError);
+      return NextResponse.redirect(`${targetUrl}/login?error=activation_failed`);
+    }
 
     return NextResponse.redirect(`${targetUrl}/login?message=account_confirmed`);
   } catch (error) {

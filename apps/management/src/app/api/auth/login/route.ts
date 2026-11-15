@@ -299,7 +299,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         { 
           success: false, 
-          error: 'Your account is pending email verification. Please check your email for the invitation link and click "Confirm It\'s Me" to activate your account.' 
+          error: 'Your account is pending email verification. Please check your email for the invitation link and click "Confirm Account" to activate your account.' 
         },
         { status: 403 }
       );

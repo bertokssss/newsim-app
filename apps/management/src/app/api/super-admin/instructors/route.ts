@@ -306,38 +306,6 @@ export async function POST(req: NextRequest) {
 
     const authUserId = authData.user.id;
 
-    // Generate a secure confirmation token with 48-hour expiry
-    const token = crypto.randomUUID();
-    const expiresAt = new Date();
-    expiresAt.setHours(expiresAt.getHours() + 48);
-
-    const { error: inviteError } = await supabaseAdmin.from('invitations').insert({
-      email: cleanEmail,
-      role: 'INSTRUCTOR',
-      token_hash: token,
-      status: 'PENDING',
-      expires_at: expiresAt.toISOString(),
-      invited_by: auth.user.id,
-    });
-
-    if (inviteError) {
-      console.warn("Failed to create invitation record:", inviteError);
-    }
-
-    const confirmUrl = `${baseUrl}/api/auth/confirm?token=${token}`;
-    
-    // We import sendInvitationEmail dynamically to avoid top-level issues if needed, or we can add it to top level imports.
-    // I will use top level import later.
-    const { sendInvitationEmail } = await import('@newsim/auth');
-    const { error: resendError } = await sendInvitationEmail(cleanEmail, `${firstName.trim()} ${lastName.trim()}`, cleanEmail, confirmUrl, 'instructor');
-
-    if (resendError) {
-      console.warn(
-        'Failed to send confirmation email, but user was created:',
-        resendError
-      );
-    }
-
     // ---------------------------------------------
     // Create profiles record
     // ---------------------------------------------
@@ -394,13 +362,9 @@ export async function POST(req: NextRequest) {
 
     if (instructorError) {
       /**
-       * Roll back the Auth user.
-       *
-       * Because profiles references the Auth user,
-       * deleting the Auth user should also trigger
-       * your configured database cleanup behavior if
-       * your FK is configured with cascading delete.
+       * Roll back the profile & Auth user so retries do not hit duplicate-user errors.
        */
+      await supabaseAdmin.from('profiles').delete().eq('id', authUserId);
       await supabaseAdmin.auth.admin.deleteUser(authUserId);
 
       throw new Error(
@@ -409,14 +373,61 @@ export async function POST(req: NextRequest) {
     }
 
     // ---------------------------------------------
+    // Create confirmation invitation & dispatch email
+    // ---------------------------------------------
+
+    const token = crypto.randomUUID();
+    const expiresAt = new Date();
+    expiresAt.setHours(expiresAt.getHours() + 48);
+
+    const { error: inviteError } = await supabaseAdmin.from('invitations').insert({
+      email: cleanEmail,
+      role: 'INSTRUCTOR',
+      token_hash: token,
+      status: 'PENDING',
+      expires_at: expiresAt.toISOString(),
+      invited_by: auth.user.id,
+    });
+
+    if (inviteError) {
+      await supabaseAdmin.from('instructors').delete().eq('profile_id', authUserId);
+      await supabaseAdmin.from('profiles').delete().eq('id', authUserId);
+      await supabaseAdmin.auth.admin.deleteUser(authUserId);
+
+      throw new Error(
+        `Failed to create confirmation invitation: ${inviteError.message}`
+      );
+    }
+
+    const confirmUrl = `${baseUrl}/api/auth/confirm?token=${token}`;
+    const { sendInvitationEmail } = await import('@newsim/auth');
+    const emailResult = await sendInvitationEmail(
+      cleanEmail,
+      `${firstName.trim()} ${lastName.trim()}`,
+      cleanEmail,
+      confirmUrl,
+      'instructor'
+    );
+
+    if (!emailResult?.success) {
+      await supabaseAdmin.from('invitations').delete().eq('token_hash', token);
+      await supabaseAdmin.from('instructors').delete().eq('profile_id', authUserId);
+      await supabaseAdmin.from('profiles').delete().eq('id', authUserId);
+      await supabaseAdmin.auth.admin.deleteUser(authUserId);
+      throw new Error(emailResult?.error || 'Failed to send confirmation email. Account creation was rolled back.');
+    }
+
+    // ---------------------------------------------
     // Success
     // ---------------------------------------------
 
-    return NextResponse.json({
-      success: true,
-      message:
-        'Instructor account created successfully. Verification email sent.',
-    });
+    return NextResponse.json(
+      {
+        success: true,
+        message: 'Instructor account created. Confirmation email sent.',
+      },
+      { status: 201 }
+    );
   } catch (error: any) {
     console.error(
       'Error creating instructor:',

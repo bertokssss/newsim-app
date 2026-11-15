@@ -359,6 +359,7 @@ export async function POST(req: NextRequest) {
 
       // 1. Create confirmed user in Supabase Auth (or recover orphaned auth.users entry if profile was deleted)
       let userId: string | undefined;
+      let createdNewAuthUser = false;
       const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
         email: normalizedEmail,
         password,
@@ -402,7 +403,17 @@ export async function POST(req: NextRequest) {
         }
       } else {
         userId = authData.user?.id;
+        createdNewAuthUser = true;
       }
+
+      const rollbackNewlyCreatedUser = async () => {
+        if (!userId) return;
+        await supabaseAdmin.from('trainees').delete().eq('profile_id', userId).then(() => {}, () => {});
+        await supabaseAdmin.from('profiles').delete().eq('id', userId).then(() => {}, () => {});
+        if (createdNewAuthUser) {
+          await supabaseAdmin.auth.admin.deleteUser(userId).catch(() => {});
+        }
+      };
 
       const baseUsername = normalizedEmail.split('@')[0];
       let finalUsername = baseUsername;
@@ -447,6 +458,7 @@ export async function POST(req: NextRequest) {
               );
             if (retryError) {
               console.error('Supabase profile creation retry error:', retryError);
+              await rollbackNewlyCreatedUser();
               return NextResponse.json(
                 { success: false, error: 'An account with this email or SRN already exists. Please sign in.' },
                 { status: 409 }
@@ -454,21 +466,30 @@ export async function POST(req: NextRequest) {
             }
           } else {
             console.error('Supabase profile creation error:', profileError);
+            await rollbackNewlyCreatedUser();
+            return NextResponse.json(
+              { success: false, error: 'Unable to save trainee profile. Please try again.' },
+              { status: 500 }
+            );
           }
         }
 
-        try {
-          await supabaseAdmin.from('trainees').upsert(
-            {
-              profile_id: userId,
-              srn: cleanSrn,
-              trainee_number: cleanSrn,
-              enrollment_status: 'ACTIVE',
-            },
-            { onConflict: 'profile_id' }
+        const { error: traineeInsertError } = await supabaseAdmin.from('trainees').upsert(
+          {
+            profile_id: userId,
+            srn: cleanSrn,
+            trainee_number: cleanSrn,
+            enrollment_status: 'ACTIVE',
+          },
+          { onConflict: 'profile_id' }
+        );
+        if (traineeInsertError) {
+          console.error('Trainees record insert error:', traineeInsertError);
+          await rollbackNewlyCreatedUser();
+          return NextResponse.json(
+            { success: false, error: 'Unable to create trainee record (email or SRN may already be registered).' },
+            { status: traineeInsertError.code === '23505' ? 409 : 500 }
           );
-        } catch (tErr) {
-          console.warn('Trainees record insert note:', tErr);
         }
 
         await recordTermsAcceptance({
@@ -612,7 +633,13 @@ export async function POST(req: NextRequest) {
       });
 
       const fullName = `${decoded.firstName || ''} ${decoded.lastName || ''}`.trim() || decoded.email;
-      await sendGoogleNumberMatchEmail(decoded.email, fullName, nextChallenge.targetNumber);
+      const resendMailRes = await sendGoogleNumberMatchEmail(decoded.email, fullName, nextChallenge.targetNumber);
+      if (!resendMailRes.success) {
+        return NextResponse.json(
+          { success: false, error: 'Unable to send the security match email right now. Please try again.' },
+          { status: 500 }
+        );
+      }
 
       return NextResponse.json({
         success: true,
@@ -681,7 +708,13 @@ export async function POST(req: NextRequest) {
           termsAgreed: Boolean(decoded.termsAgreed),
         });
         const fullName = `${decoded.firstName || ''} ${decoded.lastName || ''}`.trim() || decoded.email;
-        await sendGoogleNumberMatchEmail(decoded.email, fullName, rotated.targetNumber);
+        const rotatedMailRes = await sendGoogleNumberMatchEmail(decoded.email, fullName, rotated.targetNumber);
+        if (!rotatedMailRes.success) {
+          return NextResponse.json(
+            { success: false, error: 'Incorrect number selected, and the replacement email could not be sent. Please try again.' },
+            { status: 500 }
+          );
+        }
 
         logAuditEvent({
           actorEmail: decoded.email,
@@ -721,6 +754,20 @@ export async function POST(req: NextRequest) {
         .eq('id', userId)
         .maybeSingle();
 
+      if (!existingProfile && authEmail) {
+        const { data: existingByEmail } = await supabaseAdmin
+          .from('profiles')
+          .select('id')
+          .eq('email', authEmail)
+          .maybeSingle();
+        if (existingByEmail && existingByEmail.id !== userId) {
+          return NextResponse.json(
+            { success: false, error: 'An account with this email already exists. Please sign in.' },
+            { status: 409 }
+          );
+        }
+      }
+
       const baseUsername =
         existingProfile?.username ||
         (authEmail ? authEmail.split('@')[0] : `trainee_${userId.substring(0, 8)}`);
@@ -749,7 +796,7 @@ export async function POST(req: NextRequest) {
       if (profileError) {
         if (profileError.message?.includes('username') || profileError.code === '23505') {
           const uniqueUsername = `${baseUsername}_${userId.substring(0, 4)}`;
-          const { data: retryProfile } = await supabaseAdmin
+          const { data: retryProfile, error: retryError } = await supabaseAdmin
             .from('profiles')
             .upsert(
               {
@@ -767,30 +814,46 @@ export async function POST(req: NextRequest) {
             )
             .select()
             .maybeSingle();
+          if (retryError || !retryProfile) {
+            console.error('Google registration profile retry error:', retryError);
+            return NextResponse.json(
+              { success: false, error: 'Unable to save Google trainee profile. Please sign in if you already have an account.' },
+              { status: 409 }
+            );
+          }
           profile = retryProfile;
+        } else {
+          console.error('Google registration profile error:', profileError);
+          return NextResponse.json(
+            { success: false, error: 'Unable to save Google trainee profile. Please try again.' },
+            { status: 500 }
+          );
         }
       } else {
         profile = upsertedProfile;
       }
 
       // Ensure corresponding record exists in public.trainees (SRN remains NULL for new Google trainees; preserved if existing)
-      try {
-        const { data: existingTrainee } = await supabaseAdmin
-          .from('trainees')
-          .select('profile_id, srn, trainee_number')
-          .eq('profile_id', userId)
-          .maybeSingle();
+      const { data: existingTrainee } = await supabaseAdmin
+        .from('trainees')
+        .select('profile_id, srn, trainee_number')
+        .eq('profile_id', userId)
+        .maybeSingle();
 
-        if (!existingTrainee) {
-          await supabaseAdmin.from('trainees').insert({
-            profile_id: userId,
-            srn: null,
-            trainee_number: null,
-            enrollment_status: 'ACTIVE',
-          });
+      if (!existingTrainee) {
+        const { error: googleTraineeErr } = await supabaseAdmin.from('trainees').insert({
+          profile_id: userId,
+          srn: null,
+          trainee_number: null,
+          enrollment_status: 'ACTIVE',
+        });
+        if (googleTraineeErr && googleTraineeErr.code !== '23505') {
+          console.error('Google registration trainees insert error:', googleTraineeErr);
+          return NextResponse.json(
+            { success: false, error: 'Unable to finalize Google trainee record. Please try again.' },
+            { status: 500 }
+          );
         }
-      } catch (tErr) {
-        console.warn('Google registration trainees sync note:', tErr);
       }
 
       if (decoded.termsAgreed) {

@@ -113,7 +113,7 @@ export async function PATCH(
       const expiresAt = new Date();
       expiresAt.setHours(expiresAt.getHours() + 48);
 
-      await supabaseAdmin.from('invitations').insert({
+      const { error: inviteError } = await supabaseAdmin.from('invitations').insert({
         email: traineeProfile.email,
         role: 'TRAINEE',
         token_hash: token,
@@ -122,18 +122,32 @@ export async function PATCH(
         invited_by: auth.user?.id,
       });
 
+      if (inviteError) {
+        return NextResponse.json(
+          { success: false, error: `Failed to create confirmation invitation: ${inviteError.message}` },
+          { status: 500 }
+        );
+      }
+
       const { resolveSafeAppOrigin } = await import('@newsim/auth');
       const baseUrl = resolveSafeAppOrigin(request, 'http://localhost:3000');
       const confirmUrl = `${baseUrl}/api/auth/confirm?token=${token}`;
 
       const { sendInvitationEmail } = await import('@newsim/auth');
-      await sendInvitationEmail(
+      const emailResult = await sendInvitationEmail(
         traineeProfile.email,
         `${traineeProfile.first_name} ${traineeProfile.last_name}`,
         traineeProfile.email,
         confirmUrl,
         'trainee'
       );
+
+      if (!emailResult?.success) {
+        return NextResponse.json(
+          { success: false, error: emailResult?.error || 'Failed to send confirmation email. Please check SMTP configuration.' },
+          { status: 502 }
+        );
+      }
 
       return NextResponse.json({ success: true, message: 'Confirmation email resent successfully.' });
     }

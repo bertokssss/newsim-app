@@ -17,7 +17,16 @@ import {
   type OtpInputHandle
 } from "@newsim/ui";
 import { createClient } from "@/lib/supabase/client";
-import { executeRecaptchaChallenge, getRecaptchaV2SiteKey, RecaptchaControl, HoneypotField, trackAnalyticsEvent, CookiePreferencesTrigger } from "@newsim/ui";
+import {
+  executeRecaptchaChallenge,
+  getLastRecaptchaError,
+  getRecaptchaV2SiteKey,
+  getRecaptchaV3SiteKey,
+  RecaptchaControl,
+  HoneypotField,
+  trackAnalyticsEvent,
+  CookiePreferencesTrigger,
+} from "@newsim/ui";
 
 type AuthState =
   | "IDLE"
@@ -65,7 +74,20 @@ export default function TraineeRegisterClient() {
   const [googleMatchName, setGoogleMatchName] = useState<string>("");
   const [googleMatchOptions, setGoogleMatchOptions] = useState<number[]>([]);
   const [selectedMatchNumber, setSelectedMatchNumber] = useState<number | null>(null);
+  const [googleTermsPrompt, setGoogleTermsPrompt] = useState<boolean>(false);
   const initializedGoogleTokenRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const errParam = searchParams.get("error");
+    if (!errParam) return;
+    const regErrorMap: Record<string, string> = {
+      email_dispatch_failed:
+        "Google sign-in succeeded, but we could not send the 2-digit security verification email. Please try again shortly.",
+      google_signin_failed: "Unable to complete Google registration. Please try again.",
+      oauth_callback_failed: "Google verification could not be completed. Please try again.",
+    };
+    setError(regErrorMap[errParam] || "Unable to complete registration. Please try again.");
+  }, [searchParams]);
 
   useEffect(() => {
     const isGoogleMatch = searchParams.get("google_match") === "1";
@@ -163,8 +185,13 @@ export default function TraineeRegisterClient() {
     try {
       // Execute reCAPTCHA for registration
       const recaptchaToken = await executeRecaptchaChallenge('trainee_register', recaptchaV2Token);
-      if (!recaptchaToken && getRecaptchaV2SiteKey()) {
-        setError("Please complete the security verification check before creating an account.");
+      if (!recaptchaToken) {
+        const msg = getRecaptchaV2SiteKey()
+          ? "Please complete the security verification check before creating an account."
+          : getRecaptchaV3SiteKey()
+          ? (getLastRecaptchaError() || "Google reCAPTCHA verification could not be completed. Please refresh the page or verify your reCAPTCHA configuration.")
+          : (getLastRecaptchaError() || "Security verification service is unavailable. Please contact support.");
+        setError(msg);
         setAuthState("IDLE");
         return;
       }
@@ -181,7 +208,7 @@ export default function TraineeRegisterClient() {
           srn: srn.trim(),
           password,
           agreedToTerms,
-          recaptchaToken: recaptchaToken || 'dev-mock-recaptcha-token',
+          recaptchaToken,
           _hp_website: hpWebsite,
         }),
       });
@@ -257,8 +284,12 @@ export default function TraineeRegisterClient() {
 
     try {
       const recaptchaToken = await executeRecaptchaChallenge('trainee_register_resend', recaptchaV2Token);
-      if (!recaptchaToken && getRecaptchaV2SiteKey()) {
-        setError("Please complete the security verification check.");
+      if (!recaptchaToken) {
+        setError(
+          getRecaptchaV2SiteKey()
+            ? "Please complete the security verification check."
+            : (getLastRecaptchaError() || "Security verification could not be completed. Please refresh and try again.")
+        );
         setResending(false);
         return;
       }
@@ -274,7 +305,7 @@ export default function TraineeRegisterClient() {
           srn: srn.trim(),
           password,
           agreedToTerms,
-          recaptchaToken: recaptchaToken || 'dev-mock-recaptcha-token',
+          recaptchaToken,
           _hp_website: hpWebsite,
         }),
       });
@@ -371,24 +402,27 @@ export default function TraineeRegisterClient() {
     }
   };
 
-  const handleSocialRegister = async (provider: 'Google' = 'Google') => {
+  const launchGoogleOAuth = async () => {
     if (socialClickLockRef.current) return;
-    if (!agreedToTerms) {
-      setError("Please agree to the NEWSIM Terms and Conditions and Privacy Policy before registering with Google.");
+    if (typeof navigator !== "undefined" && /FB_IAB|FBAN|FBAV|Instagram|Line\/|MicroMessenger|;\s*wv\)/i.test(navigator.userAgent)) {
+      setError("Google Sign-In is blocked inside embedded in-app browsers (such as Facebook or Messenger). Please open this page in Chrome or Safari and try again.");
       return;
     }
+
     socialClickLockRef.current = true;
     try {
       setError(null);
+      setGoogleTermsPrompt(false);
       setAuthState("LOADING");
 
-      document.cookie = "newsim_oauth_flow=register; path=/; max-age=600; SameSite=Lax";
-      document.cookie = "newsim_oauth_terms=1; path=/; max-age=600; SameSite=Lax";
+      const secureAttr = typeof window !== "undefined" && window.location.protocol === "https:" ? "; Secure" : "";
+      document.cookie = `newsim_oauth_flow=register; path=/; max-age=600; SameSite=Lax${secureAttr}`;
+      document.cookie = `newsim_oauth_terms=1; path=/; max-age=600; SameSite=Lax${secureAttr}`;
 
       const supabase = createClient();
       const redirectUrl = `${window.location.origin}/auth/callback?flow=register&terms_agreed=1`;
 
-      const { error } = await supabase.auth.signInWithOAuth({
+      const { error: oauthError } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
           redirectTo: redirectUrl,
@@ -398,13 +432,28 @@ export default function TraineeRegisterClient() {
           },
         },
       });
-      if (error) throw error;
+      if (oauthError) throw oauthError;
     } catch (err: any) {
       socialClickLockRef.current = false;
       console.error('Google registration error:', err);
       setError(err?.message || 'Failed to initialize Google registration.');
       setAuthState("IDLE");
     }
+  };
+
+  const handleSocialRegister = async (_provider: 'Google' = 'Google') => {
+    if (!agreedToTerms) {
+      setGoogleTermsPrompt(true);
+      setError("Please agree to the NEWSIM Terms and Conditions and Privacy Policy before registering with Google.");
+      return;
+    }
+    await launchGoogleOAuth();
+  };
+
+  const handleAgreeAndGoogleRegister = async () => {
+    setAgreedToTerms(true);
+    setGoogleTermsPrompt(false);
+    await launchGoogleOAuth();
   };
 
   const containerVariants = {
@@ -442,13 +491,31 @@ export default function TraineeRegisterClient() {
             </p>
 
             {/* Quick 1-Click Authenticate with Google (with Number-Matching Security) */}
-            <div className="w-full">
+            <div className="w-full space-y-3">
               <SocialAuthButton
                 provider="Google"
                 onClick={() => handleSocialRegister('Google')}
                 disabled={authState === "LOADING"}
                 variant="light"
               />
+              {googleTermsPrompt && !agreedToTerms && (
+                <div className="rounded-lg border border-[#0B3D91]/25 bg-[#0B3D91]/5 p-3 text-xs text-slate-800 space-y-2.5">
+                  <p className="leading-relaxed">
+                    To register with Google, confirm that you agree to the NEWSIM{' '}
+                    <Link href="/terms" className="text-[#0B3D91] font-bold underline">Terms and Conditions</Link>
+                    {' '}and{' '}
+                    <Link href="/privacy" className="text-[#0B3D91] font-bold underline">Privacy Policy</Link>.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleAgreeAndGoogleRegister}
+                    disabled={authState === "LOADING"}
+                    className="w-full py-2 px-3 rounded-md bg-[#0B3D91] hover:bg-[#092f73] text-white font-semibold transition-colors cursor-pointer disabled:opacity-60"
+                  >
+                    Agree &amp; Continue with Google
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Vertical Divider */}
@@ -589,7 +656,16 @@ export default function TraineeRegisterClient() {
                       id="terms" 
                       className="border-black/30 checked:bg-black checked:border-black"
                       checked={agreedToTerms} 
-                      onChange={(e) => setAgreedToTerms(e.target.checked)}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setAgreedToTerms(checked);
+                        if (checked) {
+                          setGoogleTermsPrompt(false);
+                          if (error?.includes("Terms and Conditions")) {
+                            setError(null);
+                          }
+                        }
+                      }}
                       disabled={authState === "LOADING"} 
                     />
                   </div>

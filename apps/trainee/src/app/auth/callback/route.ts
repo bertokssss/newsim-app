@@ -108,6 +108,7 @@ export async function GET(request: NextRequest) {
         authUser = existingUserData.user;
       } else {
         console.error('OAuth callback: code exchange failed:', exchangeError.message);
+        const isPkceMissing = exchangeError.message.toLowerCase().includes('code verifier');
         logAuditEvent({
           actorEmail: 'unknown',
           actorRole: 'ANONYMOUS',
@@ -120,7 +121,7 @@ export async function GET(request: NextRequest) {
           severity: 'WARNING',
         });
         return NextResponse.redirect(
-          `${origin}/login?error=oauth_callback_failed`
+          `${origin}/login?error=${isPkceMissing ? 'oauth_pkce_missing' : 'oauth_callback_failed'}`
         );
       }
     } else {
@@ -161,6 +162,21 @@ export async function GET(request: NextRequest) {
 
     if (profileByEmail) {
       if ((profileByEmail.role || '').toUpperCase() === 'TRAINEE') {
+        if (profileByEmail.id !== authUser.id) {
+          logAuditEvent({
+            actorEmail: authEmail,
+            actorRole: 'TRAINEE',
+            action: 'OAUTH_EMAIL_ALREADY_EXISTS',
+            targetType: 'USER',
+            details: { provider, existingProfileId: profileByEmail.id, authUserId: authUser.id },
+            ipAddress: ip,
+            userAgent,
+            severity: 'WARNING',
+          });
+          return NextResponse.redirect(
+            `${origin}/login?error=account_already_exists`
+          );
+        }
         // Link existing trainee profile with this OAuth account
         profile = profileByEmail;
       } else {
@@ -255,7 +271,26 @@ export async function GET(request: NextRequest) {
       .digest('hex');
 
     const fullName = `${firstName} ${lastName}`.trim() || authEmail;
-    await sendGoogleNumberMatchEmail(authEmail, fullName, targetNumber);
+    const matchEmailResult = await sendGoogleNumberMatchEmail(authEmail, fullName, targetNumber);
+    if (!matchEmailResult.success) {
+      logAuditEvent({
+        actorId: profile?.id || undefined,
+        actorEmail: authEmail,
+        actorRole: 'TRAINEE',
+        action: 'GOOGLE_NUMBER_MATCH_EMAIL_FAILED',
+        targetType: 'USER',
+        details: { authUserId: authUser.id, provider },
+        ipAddress: ip,
+        userAgent,
+        status: 'FAILED',
+        severity: 'WARNING',
+      });
+
+      const errRedirect = NextResponse.redirect(`${origin}/register?error=email_dispatch_failed`);
+      errRedirect.cookies.delete('newsim_oauth_flow');
+      errRedirect.cookies.delete('newsim_oauth_terms');
+      return errRedirect;
+    }
 
     const googleMatchToken = jwt.sign(
       {
