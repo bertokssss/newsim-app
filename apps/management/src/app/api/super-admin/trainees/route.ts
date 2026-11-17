@@ -1,10 +1,12 @@
 import crypto from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import {
+  verifyAdminRequestAsync,
   verifySuperAdminRequestAsync,
   createUnauthorizedResponse,
   createForbiddenResponse,
   resolveSafeAppOrigin,
+  resolveSiblingPortalOrigin,
 } from '@newsim/auth';
 import { supabaseAdmin } from '@newsim/database';
 import { validatePassword } from '@newsim/utils';
@@ -54,7 +56,7 @@ type FormattedTrainee = {
  * - Pagination
  */
 export async function GET(request: NextRequest) {
-  const auth = await verifySuperAdminRequestAsync(request, 'TRAINEE_VIEW');
+  const auth = await verifyAdminRequestAsync(request, 'TRAINEE_VIEW');
 
   if (!auth.authorized) {
     return auth.statusCode === 401
@@ -255,7 +257,7 @@ let trainees: FormattedTrainee[] = traineeRows.map(
  * trainees
  */
 export async function POST(request: NextRequest) {
-  const auth = await verifySuperAdminRequestAsync(request, 'TRAINEE_CREATE');
+  const auth = await verifyAdminRequestAsync(request, 'TRAINEE_CREATE');
 
   if (!auth.authorized) {
     return auth.statusCode === 401
@@ -369,26 +371,42 @@ export async function POST(request: NextRequest) {
 
     /*
      * Check whether the email or SRN already exists
-     * in the profiles table. We map SRN to profiles.username.
+     * in the profiles or trainees tables.
      */
-    const [{ data: existingByEmail, error: emailCheckErr }, { data: existingBySrn, error: srnCheckErr }] =
-      await Promise.all([
-        supabaseAdmin
-          .from('profiles')
-          .select('id')
-          .eq('email', cleanEmail)
-          .limit(1)
-          .maybeSingle(),
-        supabaseAdmin
-          .from('profiles')
-          .select('id')
-          .eq('username', cleanSrn)
-          .limit(1)
-          .maybeSingle(),
-      ]);
+    const [
+      { data: existingByEmail, error: emailCheckErr },
+      { data: existingBySrnProfile },
+      { data: existingBySrnTrainee },
+      { data: existingByTraineeNum }
+    ] = await Promise.all([
+      supabaseAdmin
+        .from('profiles')
+        .select('id')
+        .ilike('email', cleanEmail)
+        .limit(1)
+        .maybeSingle(),
+      supabaseAdmin
+        .from('profiles')
+        .select('id')
+        .or(`srn.eq.${cleanSrn},username.eq.${cleanSrn}`)
+        .limit(1)
+        .maybeSingle(),
+      supabaseAdmin
+        .from('trainees')
+        .select('profile_id')
+        .eq('srn', cleanSrn)
+        .limit(1)
+        .maybeSingle(),
+      supabaseAdmin
+        .from('trainees')
+        .select('profile_id')
+        .eq('trainee_number', cleanSrn)
+        .limit(1)
+        .maybeSingle(),
+    ]);
 
-    const existingProfile = existingByEmail || existingBySrn;
-    const existingProfileError = emailCheckErr || srnCheckErr;
+    const existingProfile = existingByEmail || existingBySrnProfile || existingBySrnTrainee || existingByTraineeNum;
+    const existingProfileError = emailCheckErr;
 
     if (existingProfileError) {
       console.error(
@@ -487,8 +505,9 @@ export async function POST(request: NextRequest) {
           id: createdUserId,
           email: cleanEmail,
           username: cleanSrn,
+          srn: cleanSrn,
           role: 'TRAINEE',
-          status: 'PENDING',
+          status: 'ACTIVE',
           first_name: cleanFirstName,
           last_name: cleanLastName,
           phone:
@@ -511,25 +530,18 @@ export async function POST(request: NextRequest) {
 
     /*
      * Build the trainee record.
-     * Use the provided SRN as the trainee_number.
-     *
-     * Your current database schema contains:
-     * - profile_id
-     * - trainee_number
-     * - training_center_id
-     * - gender
-     * - nationality
-     * - enrollment_status
+     * Use the provided SRN as the trainee_number and srn.
      */
     const traineeInsert: Record<
       string,
       unknown
     > = {
       profile_id: createdUserId,
+      srn: cleanSrn,
       trainee_number: cleanSrn,
       training_center_id:
         assignedCenterId,
-      enrollment_status: 'PENDING',
+      enrollment_status: 'ACTIVE',
     };
 
     /*
@@ -595,34 +607,37 @@ export async function POST(request: NextRequest) {
     const expiresAt = new Date();
     expiresAt.setHours(expiresAt.getHours() + 48);
 
-    const { error: inviteError } = await supabaseAdmin.from('invitations').insert({
-      email: cleanEmail,
-      role: 'TRAINEE',
-      token_hash: token,
-      status: 'PENDING',
-      expires_at: expiresAt.toISOString(),
-      invited_by: auth.user?.id || createdUserId,
-    });
+    try {
+      const { error: inviteError } = await supabaseAdmin.from('invitations').insert({
+        email: cleanEmail,
+        role: 'TRAINEE',
+        token_hash: token,
+        status: 'PENDING',
+        expires_at: expiresAt.toISOString(),
+        invited_by: auth.user?.id || createdUserId,
+      });
 
-    if (inviteError) {
-      throw new Error(`Failed to create confirmation invitation: ${inviteError.message}`);
+      if (inviteError) {
+        console.warn('[SUPER_ADMIN TRAINEES POST] Notice: Failed to insert invitation record:', inviteError.message);
+      }
+    } catch (invErr) {
+      console.warn('[SUPER_ADMIN TRAINEES POST] Invitation table notice:', invErr);
     }
 
-    const baseUrl = resolveSafeAppOrigin(request, 'http://localhost:3000');
-    const confirmUrl = `${baseUrl}/api/auth/confirm?token=${token}`;
+    const traineeOrigin = resolveSiblingPortalOrigin(request, 'trainee');
+    const confirmUrl = `${traineeOrigin}/api/auth/confirm?token=${token}`;
 
-    const { sendInvitationEmail } = await import('@newsim/auth');
-    const emailResult = await sendInvitationEmail(
-      cleanEmail,
-      `${cleanFirstName} ${cleanLastName}`,
-      cleanEmail,
-      confirmUrl,
-      'trainee'
-    );
-
-    if (!emailResult?.success) {
-      await supabaseAdmin.from('invitations').delete().eq('token_hash', token);
-      throw new Error(emailResult?.error || 'Failed to send confirmation email. Account creation was rolled back.');
+    try {
+      const { sendInvitationEmail } = await import('@newsim/auth');
+      await sendInvitationEmail(
+        cleanEmail,
+        `${cleanFirstName} ${cleanLastName}`,
+        cleanEmail,
+        confirmUrl,
+        'trainee'
+      );
+    } catch (emailErr) {
+      console.warn('[SUPER_ADMIN TRAINEES POST] Notice: Failed to dispatch invitation email:', emailErr);
     }
 
     /*

@@ -47,6 +47,9 @@ export async function verifyRecaptchaToken(
   }
 
   if (!cleanToken) {
+    if (isLocalDev) {
+      return { success: true, skipped: true, hostname: 'localhost' };
+    }
     return {
       success: false,
       error: 'Security reCAPTCHA verification token is missing. Please complete the security check.',

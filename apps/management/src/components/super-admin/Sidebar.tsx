@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   Users,
   UserCheck,
+  BookOpen,
   BarChart3,
   FileSpreadsheet,
   ShieldCheck,
@@ -166,6 +167,12 @@ export function Sidebar({
         { name: 'Admin Accounts', href: '/super-admin/admins', icon: Users, badge: countsLoading ? '...' : formatCount(counts.admins) },
         { name: 'Instructor Accounts', href: '/super-admin/instructor-accounts', icon: UserCheck, badge: countsLoading ? '...' : formatCount(counts.instructors) },
         { name: 'Trainee Accounts', href: '/super-admin/trainee-accounts', icon: Users, badge: countsLoading ? '...' : formatCount(counts.trainees) },
+      ],
+    },
+    {
+      group: 'TRAINING OPERATIONS',
+      items: [
+        { name: 'Courses', href: '/super-admin/courses', icon: BookOpen },
       ],
     },
     {

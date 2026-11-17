@@ -253,35 +253,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 3b. Determine Effective Role & Enforce Role Toggle Identification
+    // 3b. Determine Effective Role
     const userRoleFormatted: 'SUPER_ADMIN' | 'ADMIN' =
       rawRole === 'super_admin' ? 'SUPER_ADMIN' : 'ADMIN';
-
-    if (requestedRole !== userRoleFormatted) {
-      logAuditEvent({
-        actorId: authUser.id,
-        actorEmail: authUser.email || email,
-        actorRole: userRoleFormatted,
-        action: 'LOGIN_REJECTED_ROLE_MISMATCH',
-        targetType: 'USER',
-        targetId: authUser.id,
-        details: { selectedRole: requestedRole, actualRole: userRoleFormatted },
-        ipAddress: ip,
-        userAgent,
-        status: 'FAILED',
-        severity: 'WARNING',
-      });
-
-      const selectedLabel = requestedRole === 'SUPER_ADMIN' ? 'Super Admin' : 'Admin';
-      return NextResponse.json(
-        {
-          success: false,
-          code: 'ROLE_MISMATCH',
-          error: `Role verification failed: This account is not authorized for ${selectedLabel} access. Please select the matching role toggle to sign in.`,
-        },
-        { status: 403 }
-      );
-    }
 
     // 4. Check Account Status
     const status = (profile.status || 'active').toString().toLowerCase();

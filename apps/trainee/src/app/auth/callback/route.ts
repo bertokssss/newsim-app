@@ -15,6 +15,7 @@ import {
   resolveEffectivePermissionsForUser,
   getJwtSecret,
   sendGoogleNumberMatchEmail,
+  escapeIlikePattern,
 } from '@newsim/auth';
 
 function generateNumberMatchChallenge(targetNumber: number): number[] {
@@ -152,12 +153,13 @@ export async function GET(request: NextRequest) {
   // 3. Fetch existing NEWSIM profile
   let profile = await getProfileByAuthId(authUser.id);
 
-  // If no profile by ID, check if an existing profile exists with the same email
+  // If no profile by ID, check if an existing profile exists with the same email (case-insensitive)
   if (!profile && authEmail) {
     const { data: profileByEmail } = await supabaseAdmin
       .from('profiles')
       .select('*')
-      .eq('email', authEmail)
+      .ilike('email', escapeIlikePattern(authEmail))
+      .limit(1)
       .maybeSingle();
 
     if (profileByEmail) {

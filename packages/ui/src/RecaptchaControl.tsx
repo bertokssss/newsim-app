@@ -8,6 +8,7 @@ export interface RecaptchaControlProps {
   onTokenChange?: (token: string | null) => void;
   theme?: 'light' | 'dark';
   className?: string;
+  resetSignal?: number;
 }
 
 /**
@@ -18,10 +19,20 @@ export function RecaptchaControl({
   onTokenChange,
   theme = 'light',
   className = '',
+  resetSignal = 0,
 }: RecaptchaControlProps) {
   const v2SiteKey = getRecaptchaV2SiteKey();
   const containerRef = useRef<HTMLDivElement>(null);
   const widgetIdRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!v2SiteKey || widgetIdRef.current === null || resetSignal === 0) return;
+    const gc = getWindowGrecaptcha();
+    if (gc && typeof gc.reset === 'function') {
+      gc.reset(widgetIdRef.current);
+      onTokenChange?.(null);
+    }
+  }, [resetSignal, v2SiteKey, onTokenChange]);
 
   useEffect(() => {
     if (!v2SiteKey || !containerRef.current) return;

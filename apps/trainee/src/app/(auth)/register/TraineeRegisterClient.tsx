@@ -59,6 +59,8 @@ export default function TraineeRegisterClient() {
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [hpWebsite, setHpWebsite] = useState("");
   const [recaptchaV2Token, setRecaptchaV2Token] = useState<string | null>(null);
+  const [recaptchaResetCounter, setRecaptchaResetCounter] = useState(0);
+  const [successRedirectTarget, setSuccessRedirectTarget] = useState<string>("/login?message=registration_successful");
 
   // OTP Verification State (Manual Registration)
   const [otp, setOtp] = useState("");
@@ -175,7 +177,7 @@ export default function TraineeRegisterClient() {
       return;
     }
 
-    if (!/[A-Z]/.test(password) || !/[a-z]/.test(password) || !/[0-9]/.test(password) || !/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)) {
+    if (!/[A-Z]/.test(password) || !/[a-z]/.test(password) || !/[0-9]/.test(password) || !/[^A-Za-z0-9]/.test(password)) {
       setError("Password must include uppercase, lowercase, number, and special character.");
       return;
     }
@@ -218,12 +220,20 @@ export default function TraineeRegisterClient() {
         throw new Error(data.error || "Failed to initiate trainee registration.");
       }
 
+      if (getRecaptchaV2SiteKey()) {
+        setRecaptchaV2Token(null);
+        setRecaptchaResetCounter((c) => c + 1);
+      }
       setRegistrationToken(data.registrationToken);
       setInfoMessage(data.message || `A 6-digit verification code has been dispatched to ${email.trim()}.`);
       setAuthState("OTP_VERIFY");
       setCooldown(60);
       setOtp("");
     } catch (err: any) {
+      if (getRecaptchaV2SiteKey()) {
+        setRecaptchaV2Token(null);
+        setRecaptchaResetCounter((c) => c + 1);
+      }
       setError(err?.message || "An unexpected error occurred during registration. Please try again.");
       setAuthState("ERROR");
     }
@@ -262,6 +272,7 @@ export default function TraineeRegisterClient() {
         throw new Error(data.error || "Incorrect or expired verification code.");
       }
 
+      setSuccessRedirectTarget("/login?message=registration_successful");
       setAuthState("SUCCESS");
       trackAnalyticsEvent('sign_up', { method: 'email' });
       setTimeout(() => {
@@ -323,6 +334,10 @@ export default function TraineeRegisterClient() {
     } catch (err: any) {
       setError(err?.message || "Failed to resend code. Please try again.");
     } finally {
+      if (getRecaptchaV2SiteKey()) {
+        setRecaptchaV2Token(null);
+        setRecaptchaResetCounter((c) => c + 1);
+      }
       setResending(false);
     }
   };
@@ -357,12 +372,18 @@ export default function TraineeRegisterClient() {
         return;
       }
 
+      const target = data.redirectTo || "/dashboard";
+      setSuccessRedirectTarget(target);
       setAuthState("SUCCESS");
       trackAnalyticsEvent('sign_up', { method: 'google' });
       setTimeout(() => {
-        router.push("/login?message=registration_successful");
-        router.refresh();
-      }, 1200);
+        if (target === "/dashboard" && typeof window !== "undefined") {
+          window.location.assign(target);
+        } else {
+          router.push(target);
+          router.refresh();
+        }
+      }, 900);
     } catch (err: any) {
       setError(err?.message || "Failed to verify security number. Please try again.");
       setSelectedMatchNumber(null);
@@ -420,7 +441,7 @@ export default function TraineeRegisterClient() {
       document.cookie = `newsim_oauth_terms=1; path=/; max-age=600; SameSite=Lax${secureAttr}`;
 
       const supabase = createClient();
-      const redirectUrl = `${window.location.origin}/auth/callback?flow=register&terms_agreed=1`;
+      const redirectUrl = `${window.location.origin}/auth/callback`;
 
       const { error: oauthError } = await supabase.auth.signInWithOAuth({
         provider: 'google',
@@ -679,7 +700,7 @@ export default function TraineeRegisterClient() {
               </div>
 
               <HoneypotField value={hpWebsite} onChange={setHpWebsite} />
-              <RecaptchaControl onTokenChange={setRecaptchaV2Token} theme="light" />
+              <RecaptchaControl onTokenChange={setRecaptchaV2Token} theme="light" resetSignal={recaptchaResetCounter} />
 
               {/* Submit Button */}
               <div className="pt-3">
@@ -768,6 +789,12 @@ export default function TraineeRegisterClient() {
             >
               VERIFY OTP CODE
             </Button>
+
+            {getRecaptchaV2SiteKey() && (
+              <div className="flex justify-center">
+                <RecaptchaControl onTokenChange={setRecaptchaV2Token} theme="light" resetSignal={recaptchaResetCounter} />
+              </div>
+            )}
 
             <div className="text-center">
               <button
@@ -926,7 +953,9 @@ export default function TraineeRegisterClient() {
             </motion.div>
             <h2 className="text-lg font-bold text-black mb-1 font-heading">Account Created & Verified</h2>
             <p className="text-xs text-gray-500">
-              Redirecting to Trainee Access portal...
+              {successRedirectTarget === "/dashboard"
+                ? "Redirecting to your Trainee Dashboard..."
+                : "Redirecting to Trainee Access portal..."}
             </p>
           </motion.div>
         )}

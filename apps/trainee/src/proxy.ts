@@ -45,6 +45,15 @@ function handleProxy(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // Forward OAuth callbacks (?code=...) that land on `/` or `/login` (e.g. Site URL fallback)
+  if ((path === '/' || path === '/login') && searchParams.has('code')) {
+    const callbackUrl = new URL('/auth/callback', request.nextUrl);
+    searchParams.forEach((value, key) => {
+      callbackUrl.searchParams.set(key, value);
+    });
+    return NextResponse.redirect(callbackUrl);
+  }
+
   // Prioritize trainee-specific cookie so other localhost portals never hijack or evict an active Trainee session.
   const session = resolvePortalCookieSession(
     request.cookies,
@@ -72,7 +81,11 @@ function handleProxy(request: NextRequest) {
     if (session.token && session.isAuthorized) {
       return NextResponse.redirect(new URL('/dashboard', request.nextUrl));
     }
-    return NextResponse.redirect(new URL('/login', request.nextUrl));
+    const loginUrl = new URL('/login', request.nextUrl);
+    if (searchParams.has('error')) {
+      searchParams.forEach((value, key) => loginUrl.searchParams.set(key, value));
+    }
+    return NextResponse.redirect(loginUrl);
   }
 
   // 1. Authenticated Trainee on public page (e.g. /login) without an error parameter -> go to dashboard

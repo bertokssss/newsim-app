@@ -427,9 +427,10 @@ export default function TraineeLoginClient() {
 
       const secureAttr = typeof window !== "undefined" && window.location.protocol === "https:" ? "; Secure" : "";
       document.cookie = `newsim_oauth_flow=login; path=/; max-age=600; SameSite=Lax${secureAttr}`;
+      document.cookie = `newsim_oauth_terms=; path=/; max-age=0; SameSite=Lax${secureAttr}`;
 
       const supabase = createClient();
-      const redirectUrl = `${window.location.origin}/auth/callback?flow=login`;
+      const redirectUrl = `${window.location.origin}/auth/callback`;
 
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',

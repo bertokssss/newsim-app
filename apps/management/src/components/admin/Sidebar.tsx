@@ -267,6 +267,15 @@ export function Sidebar({
       group: 'TRAINING OPERATIONS',
       items: [
         {
+          name: 'Trainees',
+          href: '/admin/trainees',
+          icon: Users,
+          badge: countsLoading
+            ? '...'
+            : formatCount(counts.trainees),
+        },
+
+        {
           name: 'Instructors',
           href: '/admin/instructors',
           icon: UserCheck,

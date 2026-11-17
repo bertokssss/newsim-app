@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@newsim/database';
-import { resolveSafeAppOrigin } from '@newsim/auth';
+import { resolveSiblingPortalOrigin } from '@newsim/auth';
 import { createClient } from '@supabase/supabase-js';
 
 export async function GET(req: NextRequest) {
@@ -9,31 +9,9 @@ export async function GET(req: NextRequest) {
   const type = searchParams.get('type');
   const next = searchParams.get('next') || '/setup-password';
 
-  function resolveTraineeBaseUrl(): string {
-    if (process.env.NEXT_PUBLIC_TRAINEE_URL) {
-      return process.env.NEXT_PUBLIC_TRAINEE_URL;
-    }
-    const safeOrigin = resolveSafeAppOrigin(req, 'http://localhost:3000');
-    const traineePort = process.env.NEXT_PUBLIC_TRAINEE_PORT || '3002';
-    try {
-      const parsed = new URL(safeOrigin);
-      if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') {
-        parsed.port = traineePort;
-        return parsed.origin;
-      }
-      if (parsed.hostname.includes('-3000.')) {
-        parsed.hostname = parsed.hostname.replace('-3000.', `-${traineePort}.`);
-        return parsed.origin;
-      }
-    } catch {
-      // fallback below
-    }
-    return `http://localhost:${traineePort}`;
-  }
-
   const code = searchParams.get('code');
   if (code) {
-    const traineeUrl = new URL(`${resolveTraineeBaseUrl()}/auth/callback`);
+    const traineeUrl = new URL(`${resolveSiblingPortalOrigin(req, 'trainee')}/auth/callback`);
     searchParams.forEach((val, key) => {
       traineeUrl.searchParams.set(key, val);
     });
@@ -42,7 +20,7 @@ export async function GET(req: NextRequest) {
 
   const errorParam = searchParams.get('error');
   if (errorParam) {
-    const traineeUrl = new URL(`${resolveTraineeBaseUrl()}/login`);
+    const traineeUrl = new URL(`${resolveSiblingPortalOrigin(req, 'trainee')}/login`);
     searchParams.forEach((val, key) => {
       traineeUrl.searchParams.set(key, val);
     });

@@ -205,12 +205,20 @@ function resolveTargetHint(req: NextRequest, roleHint?: string): string {
   return targetHint;
 }
 
-function getCandidateCookieNames(targetHint: string): string[] {
+function getCandidateCookieNames(targetHint: string, req?: NextRequest): string[] {
+  const referer = req?.headers?.get?.('referer') || '';
+  const path = req?.nextUrl?.pathname || '';
+  const isSuperAdminContext = referer.includes('/super-admin') || path.includes('/super-admin');
+
   const candidates: string[] = [];
   if (targetHint === 'SUPER_ADMIN' || targetHint === 'SUPERADMIN') {
     candidates.push(SUPER_ADMIN_COOKIE_NAME, SESSION_COOKIE_NAME);
-  } else if (targetHint === 'ADMIN' || targetHint === 'ADMINISTRATOR') {
-    candidates.push(ADMIN_COOKIE_NAME, SUPER_ADMIN_COOKIE_NAME, SESSION_COOKIE_NAME);
+  } else if (targetHint === 'ADMIN' || targetHint === 'ADMINISTRATOR' || targetHint === 'MANAGEMENT') {
+    if (isSuperAdminContext) {
+      candidates.push(SUPER_ADMIN_COOKIE_NAME, ADMIN_COOKIE_NAME, SESSION_COOKIE_NAME);
+    } else {
+      candidates.push(ADMIN_COOKIE_NAME, SUPER_ADMIN_COOKIE_NAME, SESSION_COOKIE_NAME);
+    }
   } else if (targetHint === 'INSTRUCTOR') {
     candidates.push(INSTRUCTOR_COOKIE_NAME, SUPER_ADMIN_COOKIE_NAME, SESSION_COOKIE_NAME);
   } else if (targetHint === 'TRAINEE') {
@@ -242,7 +250,7 @@ export function getSessionFromRequest(
   const targetHint = resolveTargetHint(req, roleHint);
 
   // 3. Assemble candidate cookies in prioritized order
-  const candidates = getCandidateCookieNames(targetHint);
+  const candidates = getCandidateCookieNames(targetHint, req);
 
   for (const cookieName of candidates) {
     const cookieVal = req.cookies.get(cookieName)?.value;
@@ -289,7 +297,7 @@ export function isSessionExpiredDueToInactivity(req: NextRequest, roleHint?: str
   const authHeader = req.headers.get('authorization');
   if (authHeader && authHeader.startsWith('Bearer ')) tokens.push(authHeader.substring(7));
 
-  for (const cookieName of getCandidateCookieNames(resolveTargetHint(req, roleHint))) {
+  for (const cookieName of getCandidateCookieNames(resolveTargetHint(req, roleHint), req)) {
     const cookieVal = req.cookies.get(cookieName)?.value;
     if (cookieVal) tokens.push(cookieVal);
   }
@@ -325,7 +333,7 @@ export function getRevokedSessionFromRequest(req: NextRequest, roleHint?: string
   const authHeader = req.headers.get('authorization');
   if (authHeader && authHeader.startsWith('Bearer ')) tokens.push(authHeader.substring(7));
 
-  for (const cookieName of getCandidateCookieNames(resolveTargetHint(req, roleHint))) {
+  for (const cookieName of getCandidateCookieNames(resolveTargetHint(req, roleHint), req)) {
     const cookieVal = req.cookies.get(cookieName)?.value;
     if (cookieVal) tokens.push(cookieVal);
   }
@@ -365,10 +373,8 @@ export function setSessionCookies(
   // Set dedicated role token so separate roles never overwrite each other
   if (normRole === 'SUPER_ADMIN' || normRole === 'SUPERADMIN') {
     res.cookies.set(SUPER_ADMIN_COOKIE_NAME, token, cookieBase);
-    res.cookies.set(ADMIN_COOKIE_NAME, '', { ...cookieBase, maxAge: 0, expires: new Date(0) });
   } else if (normRole === 'ADMIN' || normRole === 'ADMINISTRATOR') {
     res.cookies.set(ADMIN_COOKIE_NAME, token, cookieBase);
-    res.cookies.set(SUPER_ADMIN_COOKIE_NAME, '', { ...cookieBase, maxAge: 0, expires: new Date(0) });
   } else if (normRole === 'INSTRUCTOR') {
     res.cookies.set(INSTRUCTOR_COOKIE_NAME, token, cookieBase);
   } else if (normRole === 'TRAINEE') {

@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Eye, EyeOff, ShieldCheck, Lock, User, AlertCircle, RefreshCw, KeyRound, Copy, Check, Shield } from "lucide-react";
 import Link from "next/link";
 import { NeuralAccessLogin, NeuralInput, Button, WaveBackground, MercuryBackground, NeuralButton, Checkbox, HoneypotField, CookiePreferencesTrigger } from "@newsim/ui";
+import { deriveSiblingPortalOrigin } from "@newsim/utils";
 import { OtpInput, type OtpInputHandle } from "@/components/ui/otp-input";
 import QRCode from "react-qr-code";
 
@@ -86,20 +87,10 @@ export default function AdminLoginClient({ initialRole }: { initialRole?: "ADMIN
       const codeParam = searchParams.get("code");
 
       if (hasHashTokens || codeParam) {
-        const host = window.location.host;
-        const proto = window.location.protocol;
-        const envTraineeUrl = (process.env.NEXT_PUBLIC_TRAINEE_URL || "").replace(/\/+$/, "");
-        let traineeBase = envTraineeUrl || `${proto}//localhost:3002`;
-
-        if (!envTraineeUrl) {
-          if (host.includes("-3000.")) {
-            traineeBase = `${proto}//${host.replace("-3000.", "-3002.")}`;
-          } else if (host.includes(":3000")) {
-            traineeBase = `${proto}//${host.replace(":3000", ":3002")}`;
-          } else if (host.includes("3000")) {
-            traineeBase = `${proto}//${host.replace("3000", "3002")}`;
-          }
-        }
+        const traineeBase = deriveSiblingPortalOrigin(window.location.origin, "trainee", {
+          configuredUrl: process.env.NEXT_PUBLIC_TRAINEE_URL,
+          portOverride: process.env.NEXT_PUBLIC_TRAINEE_PORT,
+        });
 
         if (codeParam) {
           window.location.href = `${traineeBase}/auth/callback${window.location.search}`;

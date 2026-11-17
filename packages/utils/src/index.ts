@@ -97,6 +97,96 @@ export function isStrongPassword(password: string, minLength = 12): boolean {
   return validatePassword(password, minLength).isValid;
 }
 
+export type PortalAppKey = 'management' | 'instructor' | 'trainee';
+
+const PORTAL_DEFAULT_PORTS: Record<PortalAppKey, string> = {
+  management: '3000',
+  instructor: '3001',
+  trainee: '3002',
+};
+
+/**
+ * Returns true if the given host or URL points to loopback / local dev.
+ */
+export function isLocalOriginOrHost(value: string): boolean {
+  const lower = value.trim().toLowerCase();
+  return (
+    lower === 'localhost' ||
+    lower === '127.0.0.1' ||
+    lower === '::1' ||
+    lower === '[::1]' ||
+    lower.startsWith('localhost:') ||
+    lower.startsWith('127.0.0.1:') ||
+    lower.includes('://localhost') ||
+    lower.includes('://127.0.0.1')
+  );
+}
+
+/**
+ * Derives a sibling NEWSIM portal origin (`management`, `instructor`, or `trainee`)
+ * from an explicit override or the current portal origin without falling back to
+ * `localhost` on hosted Vercel deployments.
+ */
+export function deriveSiblingPortalOrigin(
+  currentOrigin: string,
+  portal: PortalAppKey,
+  options?: { configuredUrl?: string; portOverride?: string }
+): string {
+  const configured = options?.configuredUrl?.trim();
+  const isCurrentLocal = isLocalOriginOrHost(currentOrigin);
+
+  if (configured) {
+    try {
+      const parsed = new URL(configured);
+      if (
+        (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
+        (isCurrentLocal || !isLocalOriginOrHost(parsed.hostname))
+      ) {
+        return parsed.origin;
+      }
+    } catch {
+      // Ignore malformed override and fall back to host derivation
+    }
+  }
+
+  const targetPort = options?.portOverride?.trim() || PORTAL_DEFAULT_PORTS[portal];
+
+  try {
+    const parsed = new URL(currentOrigin);
+    if (isLocalOriginOrHost(parsed.hostname)) {
+      parsed.port = targetPort;
+      return parsed.origin;
+    }
+
+    const mappedVercelHost = parsed.hostname.replace(
+      /^newsim-(management|instructor|trainee)(?=[.-])/i,
+      `newsim-${portal}`
+    );
+    if (mappedVercelHost !== parsed.hostname) {
+      parsed.hostname = mappedVercelHost;
+      return parsed.origin;
+    }
+
+    const mappedCodespaceHost = parsed.hostname.replace(
+      /-(3000|3001|3002)\./,
+      `-${targetPort}.`
+    );
+    if (mappedCodespaceHost !== parsed.hostname) {
+      parsed.hostname = mappedCodespaceHost;
+      return parsed.origin;
+    }
+
+    if (parsed.hostname.endsWith('.vercel.app')) {
+      parsed.hostname = `newsim-${portal}.vercel.app`;
+      return parsed.origin;
+    }
+  } catch {
+    // Ignore malformed origin
+  }
+
+  return isCurrentLocal ? `http://localhost:${targetPort}` : `https://newsim-${portal}.vercel.app`;
+}
+
 export * from './edge-security';
 export * from './rbac';
 

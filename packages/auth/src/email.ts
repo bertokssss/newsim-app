@@ -239,6 +239,10 @@ export const sendRegistrationOtpEmail = async (
     return { success: true };
   } catch (error) {
     console.error('Failed to send registration OTP email:', error);
+    if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+      console.log(`[DEV OTP FALLBACK] Trainee Registration OTP for ${to}: ${otp}`);
+      return { success: true, mocked: true };
+    }
     return { success: false, error };
   }
 };

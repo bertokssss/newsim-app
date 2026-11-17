@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@newsim/database';
 import {
+  verifyAdminRequestAsync,
   verifySuperAdminRequestAsync,
   createUnauthorizedResponse,
   createForbiddenResponse,
   reactivateAccount,
+  resolveSiblingPortalOrigin,
 } from '@newsim/auth';
 import {
   formatAttendance,
@@ -22,7 +24,7 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await verifySuperAdminRequestAsync(request, 'TRAINEE_VIEW');
+  const auth = await verifyAdminRequestAsync(request, 'TRAINEE_VIEW');
 
   if (!auth.authorized) {
     return auth.statusCode === 401
@@ -81,7 +83,7 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await verifySuperAdminRequestAsync(request, 'TRAINEE_UPDATE');
+  const auth = await verifyAdminRequestAsync(request, 'TRAINEE_UPDATE');
 
   if (!auth.authorized || !auth.user) {
     return auth.statusCode === 401
@@ -129,8 +131,7 @@ export async function PATCH(
         );
       }
 
-      const { resolveSafeAppOrigin } = await import('@newsim/auth');
-      const baseUrl = resolveSafeAppOrigin(request, 'http://localhost:3000');
+      const baseUrl = resolveSiblingPortalOrigin(request, 'trainee');
       const confirmUrl = `${baseUrl}/api/auth/confirm?token=${token}`;
 
       const { sendInvitationEmail } = await import('@newsim/auth');
@@ -230,7 +231,7 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await verifySuperAdminRequestAsync(request, 'TRAINEE_DELETE');
+  const auth = await verifyAdminRequestAsync(request, 'TRAINEE_DELETE');
   if (!auth.authorized) {
     return auth.statusCode === 401
       ? createUnauthorizedResponse(auth.error)

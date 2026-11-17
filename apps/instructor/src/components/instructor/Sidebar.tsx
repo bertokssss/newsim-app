@@ -8,7 +8,6 @@ import {
   Anchor,
   LayoutDashboard,
   BookOpen,
-  FileSpreadsheet,
   Users,
   Award,
   GraduationCap,
@@ -108,7 +107,6 @@ export function Sidebar({
       group: 'TRAINING OPERATIONS',
       items: [
         { name: 'My Courses', href: '/my-courses', icon: BookOpen },
-        { name: 'Learning Materials', href: '/learning-materials', icon: FileSpreadsheet },
         { name: 'Trainees', href: '/trainees', icon: Users },
         { name: 'Assessments', href: '/assessments', icon: Award },
         { name: 'Grades', href: '/grades', icon: GraduationCap },

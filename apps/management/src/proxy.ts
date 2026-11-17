@@ -92,11 +92,6 @@ function handleProxy(request: NextRequest) {
     return NextResponse.redirect(new URL('/login?error=unauthorized_portal', request.url));
   }
 
-  // Keep Super Admins on the Super Admin portal instead of rendering a partial Admin sidebar
-  if ((path === '/admin' || path.startsWith('/admin/')) && SUPER_ADMIN_ROLES.includes(session.role)) {
-    return NextResponse.redirect(new URL('/super-admin/dashboard', request.url));
-  }
-
   return NextResponse.next();
 }
 

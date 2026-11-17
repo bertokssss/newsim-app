@@ -1,3 +1,9 @@
+import {
+  deriveSiblingPortalOrigin,
+  isLocalOriginOrHost,
+  type PortalAppKey,
+} from '@newsim/utils';
+
 const RECENT_SUBMISSIONS = new Map<string, number>();
 
 /**
@@ -81,6 +87,13 @@ export function escapePostgrestFilter(value: unknown, maxLength = 120): string {
 }
 
 /**
+ * Escapes `%`, `_`, and `\` before passing an untrusted string to `.ilike()`.
+ */
+export function escapeIlikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, '\\$&');
+}
+
+/**
  * Validates that a candidate external URL only uses safe http(s) protocols or relative paths.
  */
 export function sanitizeMaterialUrl(value: unknown): string {
@@ -112,6 +125,19 @@ export function resolveSafeAppOrigin(
   req: { headers: { get(name: string): string | null }; url?: string },
   fallbackLocalUrl: string
 ): string {
+  const originHeader = req.headers.get('origin');
+  const forwardedHost = req.headers.get('x-forwarded-host');
+  const hostHeader = forwardedHost || req.headers.get('host');
+  const protoHeader =
+    req.headers.get('x-forwarded-proto') ||
+    (hostHeader?.includes('localhost') || hostHeader?.includes('127.0.0.1') ? 'http' : 'https');
+
+  const isHostedDeployment =
+    process.env.VERCEL === '1' ||
+    (Boolean(process.env.VERCEL_ENV) && process.env.VERCEL_ENV !== 'development') ||
+    Boolean(process.env.VERCEL_PROJECT_PRODUCTION_URL) ||
+    (hostHeader !== null && hostHeader !== '' && !isLocalOriginOrHost(hostHeader));
+
   const candidates = [
     process.env.NEXT_PUBLIC_APP_URL,
     process.env.NEXT_PUBLIC_SITE_URL,
@@ -122,9 +148,13 @@ export function resolveSafeAppOrigin(
   for (const candidate of candidates) {
     try {
       const parsed = new URL(candidate);
-      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
-        return parsed.origin;
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        continue;
       }
+      if (isHostedDeployment && isLocalOriginOrHost(parsed.hostname)) {
+        continue;
+      }
+      return parsed.origin;
     } catch {
       // ignore invalid env value
     }
@@ -134,11 +164,6 @@ export function resolveSafeAppOrigin(
     .split(',')
     .map((h) => h.trim().toLowerCase())
     .filter(Boolean);
-
-  const originHeader = req.headers.get('origin');
-  const forwardedHost = req.headers.get('x-forwarded-host');
-  const hostHeader = forwardedHost || req.headers.get('host');
-  const protoHeader = req.headers.get('x-forwarded-proto') || (hostHeader?.includes('localhost') || hostHeader?.includes('127.0.0.1') ? 'http' : 'https');
 
   const rawCandidate = originHeader || (hostHeader ? `${protoHeader}://${hostHeader}` : fallbackLocalUrl);
   try {
@@ -155,4 +180,40 @@ export function resolveSafeAppOrigin(
   }
 
   return fallbackLocalUrl;
+}
+
+/**
+ * Resolves a sibling NEWSIM portal origin from the current request/host context
+ * so hosted deployments never fall back to `localhost` when redirecting across portals.
+ */
+export function resolveSiblingPortalOrigin(
+  req: { headers: { get(name: string): string | null }; url?: string },
+  portal: PortalAppKey,
+  options?: {
+    fallbackCurrentOrigin?: string;
+    configuredUrl?: string;
+    portOverride?: string;
+  }
+): string {
+  const fallbackOrigin = options?.fallbackCurrentOrigin || 'http://localhost:3000';
+  const currentOrigin = resolveSafeAppOrigin(req, fallbackOrigin);
+  const envConfiguredUrl =
+    options?.configuredUrl ??
+    (portal === 'trainee'
+      ? process.env.NEXT_PUBLIC_TRAINEE_URL
+      : portal === 'instructor'
+        ? process.env.NEXT_PUBLIC_INSTRUCTOR_URL
+        : process.env.NEXT_PUBLIC_MANAGEMENT_URL);
+  const envPortOverride =
+    options?.portOverride ??
+    (portal === 'trainee'
+      ? process.env.NEXT_PUBLIC_TRAINEE_PORT
+      : portal === 'instructor'
+        ? process.env.NEXT_PUBLIC_INSTRUCTOR_PORT
+        : process.env.NEXT_PUBLIC_MANAGEMENT_PORT);
+
+  return deriveSiblingPortalOrigin(currentOrigin, portal, {
+    configuredUrl: envConfiguredUrl,
+    portOverride: envPortOverride,
+  });
 }

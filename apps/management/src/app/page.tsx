@@ -1,12 +1,14 @@
+import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
+import { resolveSiblingPortalOrigin } from '@newsim/auth';
 
 export default async function ManagementRootPage(props: {
   searchParams?: Promise<{ [key: string]: string | undefined }>;
 }) {
   const searchParams = props.searchParams ? await props.searchParams : {};
   if (searchParams?.code) {
-    const traineePort = process.env.NEXT_PUBLIC_TRAINEE_PORT || '3002';
-    const targetBase = process.env.NEXT_PUBLIC_TRAINEE_URL || `http://localhost:${traineePort}`;
+    const reqHeaders = await headers();
+    const targetBase = resolveSiblingPortalOrigin({ headers: reqHeaders }, 'trainee');
     const params = new URLSearchParams();
     Object.entries(searchParams).forEach(([k, v]) => {
       if (v) params.set(k, v);

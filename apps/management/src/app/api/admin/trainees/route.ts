@@ -44,3 +44,6 @@ export async function GET(request: NextRequest) {
     );
   }
 }
+
+export { POST } from '@/app/api/super-admin/trainees/route';
+

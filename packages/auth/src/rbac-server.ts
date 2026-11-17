@@ -10,6 +10,7 @@ import {
 } from '@newsim/utils';
 import {
   SuperAdminAuthResult,
+  verifyAdminRequest,
   verifyInstructorRequest,
   verifySuperAdminRequest,
   verifyTraineeRequest,
@@ -202,6 +203,58 @@ export async function verifySuperAdminRequestAsync(
   };
 
   if (requiredPermission && !hasModulePermission(effectivePermissions, requiredPermission, 'SUPER_ADMIN')) {
+    return {
+      authorized: false,
+      error: `Insufficient permission: Missing required privilege '${requiredPermission}'.`,
+      statusCode: 403,
+    };
+  }
+
+  return {
+    ...base,
+    user: enrichedUser,
+  };
+}
+
+/**
+ * Checks live RBAC role_permissions for Admin and Super Admin routes and guarantees payment isolation.
+ */
+export async function verifyAdminRequestAsync(
+  req: NextRequest,
+  requiredPermission?: string
+): Promise<SuperAdminAuthResult> {
+  const base = verifyAdminRequest(req);
+  if (!base.authorized || !base.user) {
+    return base;
+  }
+
+  const normRole = normalizeRbacRole(base.user.role) === 'SUPER_ADMIN' ? 'SUPER_ADMIN' : 'ADMIN';
+
+  if (requiredPermission) {
+    const isPaymentPerm = [
+      'PAYMENT_VIEW',
+      'PAYMENT_VERIFY',
+      'PAYMENT_REFUND',
+      'FINANCIAL_REPORTS',
+      'FINANCIAL_ACCESS',
+    ].includes(requiredPermission.toUpperCase());
+
+    if (isPaymentPerm && normRole === 'SUPER_ADMIN') {
+      return {
+        authorized: false,
+        error: `Financial privacy restriction: Super Admin accounts are restricted from '${requiredPermission}'.`,
+        statusCode: 403,
+      };
+    }
+  }
+
+  const effectivePermissions = await resolveEffectivePermissionsForUser(base.user.id, normRole);
+  const enrichedUser = {
+    ...base.user,
+    permissions: effectivePermissions,
+  };
+
+  if (requiredPermission && !hasModulePermission(effectivePermissions, requiredPermission, normRole)) {
     return {
       authorized: false,
       error: `Insufficient permission: Missing required privilege '${requiredPermission}'.`,

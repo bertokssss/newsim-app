@@ -310,6 +310,15 @@ export function Header({
 
               <div className="py-2 px-1 text-xs space-y-0.5">
                 <Link
+                  href="/admin/dashboard"
+                  onClick={() => setUserDropdownOpen(false)}
+                  className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sky-600 dark:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-950/40 transition-colors font-medium"
+                >
+                  <ShieldCheck className="w-4 h-4 text-sky-500" />
+                  <span>Switch to Admin Portal</span>
+                </Link>
+
+                <Link
                   href="/super-admin/settings"
                   onClick={() => setUserDropdownOpen(false)}
                   className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors font-medium"

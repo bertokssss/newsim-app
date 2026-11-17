@@ -1,6 +1,8 @@
 import React, { Suspense } from 'react';
 import { Metadata } from 'next';
+import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
+import { resolveSiblingPortalOrigin } from '@newsim/auth';
 import AdminLoginClient from './AdminLoginClient';
 
 export const metadata: Metadata = {
@@ -13,8 +15,8 @@ export default async function SuperAdminLoginPage(props: {
 }) {
   const searchParams = props.searchParams ? await props.searchParams : {};
   if (searchParams?.code) {
-    const traineePort = process.env.NEXT_PUBLIC_TRAINEE_PORT || '3002';
-    const targetBase = process.env.NEXT_PUBLIC_TRAINEE_URL || `http://localhost:${traineePort}`;
+    const reqHeaders = await headers();
+    const targetBase = resolveSiblingPortalOrigin({ headers: reqHeaders }, 'trainee');
     const params = new URLSearchParams();
     Object.entries(searchParams).forEach(([k, v]) => {
       if (v) params.set(k, v);

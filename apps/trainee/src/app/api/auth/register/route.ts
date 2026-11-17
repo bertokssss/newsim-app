@@ -16,6 +16,7 @@ import {
   acquireSubmissionLock,
   sanitizeText,
   sanitizeEmail,
+  escapeIlikePattern,
   isValidEmail,
   isValidSrn,
   isValidMobile,
@@ -24,7 +25,20 @@ import {
   PRIVACY_VERSION,
   logAuditEvent,
   getRolePermissionsFromDb,
+  resolveEffectivePermissionsForUser,
+  createSessionToken,
+  setSessionCookies,
 } from '@newsim/auth';
+
+async function findExistingProfileByEmail(normalizedEmail: string) {
+  const { data } = await supabaseAdmin
+    .from('profiles')
+    .select('id')
+    .ilike('email', escapeIlikePattern(normalizedEmail))
+    .limit(1)
+    .maybeSingle();
+  return data;
+}
 
 function generateShuffledMatchOptions(targetNumber: number): number[] {
   const choices = new Set<number>([targetNumber]);
@@ -104,13 +118,17 @@ function decryptRegistrationSecret(payload: string): string | null {
   }
 }
 
-async function isSrnTaken(cleanSrn: string): Promise<boolean> {
+async function isSrnTaken(cleanSrn: string, excludeUserId?: string): Promise<boolean> {
   const [{ data: tBySrn }, { data: tByNum }, { data: pBySrn }] = await Promise.all([
     supabaseAdmin.from('trainees').select('profile_id').eq('srn', cleanSrn).maybeSingle(),
     supabaseAdmin.from('trainees').select('profile_id').eq('trainee_number', cleanSrn).maybeSingle(),
     supabaseAdmin.from('profiles').select('id').eq('srn', cleanSrn).maybeSingle(),
   ]);
-  return Boolean(tBySrn || tByNum || pBySrn);
+  const takenByOther =
+    (tBySrn && (!excludeUserId || tBySrn.profile_id !== excludeUserId)) ||
+    (tByNum && (!excludeUserId || tByNum.profile_id !== excludeUserId)) ||
+    (pBySrn && (!excludeUserId || pBySrn.id !== excludeUserId));
+  return Boolean(takenByOther);
 }
 
 export async function POST(req: NextRequest) {
@@ -217,11 +235,7 @@ export async function POST(req: NextRequest) {
       }
 
       // 4. Check if email already exists in public.profiles
-      const { data: existingProfile } = await supabaseAdmin
-        .from('profiles')
-        .select('id')
-        .eq('email', normalizedEmail)
-        .maybeSingle();
+      const existingProfile = await findExistingProfileByEmail(normalizedEmail);
 
       if (existingProfile) {
         return NextResponse.json(
@@ -344,11 +358,7 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      const { data: existingProfileAtVerify } = await supabaseAdmin
-        .from('profiles')
-        .select('id')
-        .eq('email', normalizedEmail)
-        .maybeSingle();
+      const existingProfileAtVerify = await findExistingProfileByEmail(normalizedEmail);
 
       if (existingProfileAtVerify) {
         return NextResponse.json(
@@ -755,11 +765,7 @@ export async function POST(req: NextRequest) {
         .maybeSingle();
 
       if (!existingProfile && authEmail) {
-        const { data: existingByEmail } = await supabaseAdmin
-          .from('profiles')
-          .select('id')
-          .eq('email', authEmail)
-          .maybeSingle();
+        const existingByEmail = await findExistingProfileByEmail(authEmail);
         if (existingByEmail && existingByEmail.id !== userId) {
           return NextResponse.json(
             { success: false, error: 'An account with this email already exists. Please sign in.' },
@@ -906,25 +912,26 @@ export async function POST(req: NextRequest) {
         severity: 'INFO',
       });
 
-      // Keep in-memory DB in sync
+      // Sync in-memory store, issue NEWSIM Trainee session cookies, and send user directly to /dashboard
+      const resolvedTraineePerms = await resolveEffectivePermissionsForUser(userId, 'TRAINEE');
+      const userRecord = {
+        id: userId,
+        email: authEmail,
+        username: profile?.username || baseUsername,
+        passwordHash: '',
+        role: 'TRAINEE' as const,
+        status: 'ACTIVE' as const,
+        firstName: profile?.first_name || firstName,
+        lastName: profile?.last_name || lastName,
+        department: profile?.department || '',
+        permissions: resolvedTraineePerms,
+        mfaEnabled: false,
+        failedLoginAttempts: 0,
+        mustChangePassword: false,
+        createdAt: profile?.created_at || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
       try {
-        const resolvedTraineePerms = await getRolePermissionsFromDb('TRAINEE');
-        const userRecord = {
-          id: userId,
-          email: authEmail,
-          username: profile?.username || baseUsername,
-          passwordHash: '',
-          role: 'TRAINEE' as const,
-          status: 'ACTIVE' as const,
-          firstName: profile?.first_name || firstName,
-          lastName: profile?.last_name || lastName,
-          permissions: resolvedTraineePerms,
-          mfaEnabled: false,
-          failedLoginAttempts: 0,
-          mustChangePassword: false,
-          createdAt: profile?.created_at || new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        };
         if (db.getUserById(userId)) {
           db.updateUser(userId, userRecord);
         } else {
@@ -934,10 +941,38 @@ export async function POST(req: NextRequest) {
         // non-blocking
       }
 
-      return NextResponse.json({
-        success: true,
-        message: 'Google security verification complete! Your trainee account is now active. You may now sign in.',
+      const { token } = createSessionToken(userRecord, ip, userAgent);
+
+      try {
+        await supabaseAdmin
+          .from('profiles')
+          .update({ last_login_at: new Date().toISOString() })
+          .eq('id', userId);
+      } catch {
+        // non-blocking
+      }
+
+      logAuditEvent({
+        actorId: userId,
+        actorEmail: authEmail,
+        actorRole: 'TRAINEE',
+        action: 'LOGIN_SUCCESS',
+        targetType: 'SESSION',
+        details: { method: `${provider.toUpperCase()}_OAUTH_REGISTER`, provider },
+        ipAddress: ip,
+        userAgent,
+        severity: 'INFO',
       });
+
+      const response = NextResponse.json({
+        success: true,
+        redirectTo: '/dashboard',
+        message: 'Google security verification complete! Signing you in to your trainee dashboard...',
+      });
+      setSessionCookies(response, token, 'TRAINEE');
+      response.cookies.delete('newsim_oauth_flow');
+      response.cookies.delete('newsim_oauth_terms');
+      return response;
     }
 
     return NextResponse.json(
