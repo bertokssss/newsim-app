@@ -169,7 +169,13 @@ export async function executeRecaptchaChallenge(
     lastRecaptchaError = 'Security verification (reCAPTCHA) is not configured.';
   }
 
-  if (process.env.NODE_ENV === 'development') {
+  const isLocalHost =
+    typeof window !== 'undefined' &&
+    (window.location.hostname === 'localhost' ||
+      window.location.hostname === '127.0.0.1' ||
+      window.location.hostname.endsWith('.local'));
+
+  if (process.env.NODE_ENV === 'development' || isLocalHost) {
     lastRecaptchaError = null;
     return 'dev-mock-recaptcha-token';
   }

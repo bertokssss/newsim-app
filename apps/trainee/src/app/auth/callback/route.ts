@@ -238,100 +238,101 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // 4. Third-Party (Google) Registration Security Confirmation:
-  // If initiated from /register OR if this is a brand-new OAuth trainee account,
-  // enforce the 2-digit Number-Matching Security Challenge before completing registration.
-  if (flow === 'register' || isNewRegistration) {
+  // 4. Third-Party (Google) Registration:
+  // Third-party registration is secured by reCAPTCHA on the registration page.
+  // When a new trainee registers via Google OAuth, provision their profile directly.
+  if (isNewRegistration && !profile) {
     const meta = authUser.user_metadata || {};
     const firstName =
       meta.given_name ||
       meta.first_name ||
       meta.full_name?.split(' ')[0] ||
       meta.name?.split(' ')[0] ||
-      profile?.first_name ||
       'Trainee';
     const lastName =
       meta.family_name ||
       meta.last_name ||
       meta.full_name?.split(' ').slice(1).join(' ') ||
       meta.name?.split(' ').slice(1).join(' ') ||
-      profile?.last_name ||
       'Account';
     const avatarUrl =
       meta.avatar_url ||
       meta.picture?.data?.url ||
       (typeof meta.picture === 'string' ? meta.picture : null) ||
-      profile?.avatar_url ||
       null;
 
-    const targetNumber = crypto.randomInt(10, 100);
-    const options = generateNumberMatchChallenge(targetNumber);
-    const jti = crypto.randomUUID();
-    const targetHmac = crypto
-      .createHmac('sha256', getJwtSecret())
-      .update(`${jti}:${targetNumber}`)
-      .digest('hex');
+    const baseUsername = authEmail ? authEmail.split('@')[0] : `trainee_${authUser.id.substring(0, 8)}`;
 
-    const fullName = `${firstName} ${lastName}`.trim() || authEmail;
-    const matchEmailResult = await sendGoogleNumberMatchEmail(authEmail, fullName, targetNumber);
-    if (!matchEmailResult.success) {
-      logAuditEvent({
-        actorId: profile?.id || undefined,
-        actorEmail: authEmail,
-        actorRole: 'TRAINEE',
-        action: 'GOOGLE_NUMBER_MATCH_EMAIL_FAILED',
-        targetType: 'USER',
-        details: { authUserId: authUser.id, provider },
-        ipAddress: ip,
-        userAgent,
-        status: 'FAILED',
-        severity: 'WARNING',
-      });
+    const { data: newProfile, error: profileErr } = await supabaseAdmin
+      .from('profiles')
+      .upsert(
+        {
+          id: authUser.id,
+          email: authEmail,
+          username: baseUsername,
+          first_name: firstName,
+          last_name: lastName,
+          avatar_url: avatarUrl,
+          srn: null,
+          role: 'TRAINEE',
+          status: 'ACTIVE',
+        },
+        { onConflict: 'id' }
+      )
+      .select()
+      .maybeSingle();
 
-      const errRedirect = NextResponse.redirect(`${origin}/register?error=email_dispatch_failed`);
-      errRedirect.cookies.delete('newsim_oauth_flow');
-      errRedirect.cookies.delete('newsim_oauth_terms');
-      return errRedirect;
+    if (profileErr) {
+      console.warn('OAuth callback: profile insert retry with unique username:', profileErr.message);
+      const uniqueUsername = `${baseUsername}_${authUser.id.substring(0, 4)}`;
+      const { data: retryProfile } = await supabaseAdmin
+        .from('profiles')
+        .upsert(
+          {
+            id: authUser.id,
+            email: authEmail,
+            username: uniqueUsername,
+            first_name: firstName,
+            last_name: lastName,
+            avatar_url: avatarUrl,
+            srn: null,
+            role: 'TRAINEE',
+            status: 'ACTIVE',
+          },
+          { onConflict: 'id' }
+        )
+        .select()
+        .maybeSingle();
+      profile = retryProfile;
+    } else {
+      profile = newProfile;
     }
 
-    const googleMatchToken = jwt.sign(
-      {
-        purpose: 'GOOGLE_REGISTRATION_MATCH',
-        jti,
-        userId: authUser.id,
-        email: authEmail,
-        firstName,
-        lastName,
-        avatarUrl,
-        provider,
-        termsAgreed: Boolean(termsAgreed),
-        options,
-        targetHmac,
-      },
-      getJwtSecret(),
-      { expiresIn: '10m' }
-    );
+    if (termsAgreed) {
+      try {
+        await recordTermsAcceptance({
+          userId: authUser.id,
+          termsVersion: TERMS_VERSION,
+          privacyVersion: PRIVACY_VERSION,
+          ipAddress: ip,
+          userAgent,
+          acceptanceContext: 'OAUTH_ONBOARDING',
+          actorRole: 'TRAINEE',
+        });
+      } catch {}
+    }
 
     logAuditEvent({
-      actorId: profile?.id || undefined,
+      actorId: authUser.id,
       actorEmail: authEmail,
       actorRole: 'TRAINEE',
-      action: 'GOOGLE_NUMBER_MATCH_CHALLENGE_ISSUED',
+      action: 'GOOGLE_REGISTRATION_COMPLETED',
       targetType: 'USER',
-      details: { authUserId: authUser.id, provider, isNewRegistration },
+      details: { authUserId: authUser.id, provider },
       ipAddress: ip,
       userAgent,
       severity: 'INFO',
     });
-
-    const matchRedirect = NextResponse.redirect(
-      `${origin}/register?google_match=1&token=${encodeURIComponent(googleMatchToken)}`
-    );
-    matchRedirect.cookies.delete('newsim_oauth_flow');
-    matchRedirect.cookies.delete('newsim_oauth_terms');
-    matchRedirect.cookies.delete('trainee_session_token');
-    matchRedirect.cookies.delete('session_token');
-    return matchRedirect;
   }
 
   // 5. Profile must exist at this point (existing trainee login)

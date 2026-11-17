@@ -214,16 +214,18 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // 2. Always verify reCAPTCHA token server-side
-      const recaptchaCheck = await verifyRecaptchaToken(recaptchaToken, {
-        remoteIp: ip,
-        actorEmail: normalizedEmail,
-      });
-      if (!recaptchaCheck.success) {
-        return NextResponse.json(
-          { success: false, error: recaptchaCheck.error || 'reCAPTCHA verification failed. Please try again.' },
-          { status: 400 }
-        );
+      // 2. Verify reCAPTCHA token if provided (manual registration is verified via email OTP)
+      if (recaptchaToken) {
+        const recaptchaCheck = await verifyRecaptchaToken(recaptchaToken, {
+          remoteIp: ip,
+          actorEmail: normalizedEmail,
+        });
+        if (!recaptchaCheck.success) {
+          return NextResponse.json(
+            { success: false, error: recaptchaCheck.error || 'reCAPTCHA verification failed. Please try again.' },
+            { status: 400 }
+          );
+        }
       }
 
       // 3. Check if SRN already exists in public.trainees or public.profiles

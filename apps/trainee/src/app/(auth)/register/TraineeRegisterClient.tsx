@@ -185,19 +185,6 @@ export default function TraineeRegisterClient() {
     setAuthState("LOADING");
     
     try {
-      // Execute reCAPTCHA for registration
-      const recaptchaToken = await executeRecaptchaChallenge('trainee_register', recaptchaV2Token);
-      if (!recaptchaToken) {
-        const msg = getRecaptchaV2SiteKey()
-          ? "Please complete the security verification check before creating an account."
-          : getRecaptchaV3SiteKey()
-          ? (getLastRecaptchaError() || "Google reCAPTCHA verification could not be completed. Please refresh the page or verify your reCAPTCHA configuration.")
-          : (getLastRecaptchaError() || "Security verification service is unavailable. Please contact support.");
-        setError(msg);
-        setAuthState("IDLE");
-        return;
-      }
-
       const res = await fetch("/api/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -210,7 +197,6 @@ export default function TraineeRegisterClient() {
           srn: srn.trim(),
           password,
           agreedToTerms,
-          recaptchaToken,
           _hp_website: hpWebsite,
         }),
       });
@@ -220,20 +206,12 @@ export default function TraineeRegisterClient() {
         throw new Error(data.error || "Failed to initiate trainee registration.");
       }
 
-      if (getRecaptchaV2SiteKey()) {
-        setRecaptchaV2Token(null);
-        setRecaptchaResetCounter((c) => c + 1);
-      }
       setRegistrationToken(data.registrationToken);
       setInfoMessage(data.message || `A 6-digit verification code has been dispatched to ${email.trim()}.`);
       setAuthState("OTP_VERIFY");
       setCooldown(60);
       setOtp("");
     } catch (err: any) {
-      if (getRecaptchaV2SiteKey()) {
-        setRecaptchaV2Token(null);
-        setRecaptchaResetCounter((c) => c + 1);
-      }
       setError(err?.message || "An unexpected error occurred during registration. Please try again.");
       setAuthState("ERROR");
     }
@@ -294,16 +272,6 @@ export default function TraineeRegisterClient() {
     setInfoMessage(null);
 
     try {
-      const recaptchaToken = await executeRecaptchaChallenge('trainee_register_resend', recaptchaV2Token);
-      if (!recaptchaToken) {
-        setError(
-          getRecaptchaV2SiteKey()
-            ? "Please complete the security verification check."
-            : (getLastRecaptchaError() || "Security verification could not be completed. Please refresh and try again.")
-        );
-        setResending(false);
-        return;
-      }
       const res = await fetch("/api/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -316,7 +284,6 @@ export default function TraineeRegisterClient() {
           srn: srn.trim(),
           password,
           agreedToTerms,
-          recaptchaToken,
           _hp_website: hpWebsite,
         }),
       });
@@ -334,10 +301,6 @@ export default function TraineeRegisterClient() {
     } catch (err: any) {
       setError(err?.message || "Failed to resend code. Please try again.");
     } finally {
-      if (getRecaptchaV2SiteKey()) {
-        setRecaptchaV2Token(null);
-        setRecaptchaResetCounter((c) => c + 1);
-      }
       setResending(false);
     }
   };
@@ -468,13 +431,38 @@ export default function TraineeRegisterClient() {
       setError("Please agree to the NEWSIM Terms and Conditions and Privacy Policy before registering with Google.");
       return;
     }
-    await launchGoogleOAuth();
+
+    setAuthState("LOADING");
+    setError(null);
+
+    try {
+      // Third-party registration uses Captcha verification
+      const recaptchaToken = await executeRecaptchaChallenge('google_register', recaptchaV2Token);
+      if (!recaptchaToken) {
+        const msg = getRecaptchaV2SiteKey()
+          ? "Please complete the security captcha verification before continuing with Google."
+          : (getLastRecaptchaError() || "Security captcha verification could not be completed. Please refresh and try again.");
+        setError(msg);
+        setAuthState("IDLE");
+        return;
+      }
+
+      await launchGoogleOAuth();
+    } catch (err: any) {
+      setError(err?.message || "Failed to initialize Google registration.");
+      setAuthState("IDLE");
+    } finally {
+      if (getRecaptchaV2SiteKey()) {
+        setRecaptchaV2Token(null);
+        setRecaptchaResetCounter((c) => c + 1);
+      }
+    }
   };
 
   const handleAgreeAndGoogleRegister = async () => {
     setAgreedToTerms(true);
     setGoogleTermsPrompt(false);
-    await launchGoogleOAuth();
+    await handleSocialRegister('Google');
   };
 
   const containerVariants = {
@@ -511,13 +499,19 @@ export default function TraineeRegisterClient() {
               Create an account to begin your maritime journey, access simulator training, and track your progress across all modules.
             </p>
 
-            {/* Quick 1-Click Authenticate with Google (with Number-Matching Security) */}
+            {/* Quick 1-Click Authenticate with Google (Protected by Captcha) */}
             <div className="w-full space-y-3">
               <SocialAuthButton
                 provider="Google"
                 onClick={() => handleSocialRegister('Google')}
                 disabled={authState === "LOADING"}
                 variant="light"
+              />
+              <RecaptchaControl
+                onTokenChange={setRecaptchaV2Token}
+                theme="light"
+                resetSignal={recaptchaResetCounter}
+                className="pt-1"
               />
               {googleTermsPrompt && !agreedToTerms && (
                 <div className="rounded-lg border border-[#0B3D91]/25 bg-[#0B3D91]/5 p-3 text-xs text-slate-800 space-y-2.5">
@@ -700,7 +694,6 @@ export default function TraineeRegisterClient() {
               </div>
 
               <HoneypotField value={hpWebsite} onChange={setHpWebsite} />
-              <RecaptchaControl onTokenChange={setRecaptchaV2Token} theme="light" resetSignal={recaptchaResetCounter} />
 
               {/* Submit Button */}
               <div className="pt-3">
