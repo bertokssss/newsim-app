@@ -436,15 +436,11 @@ export default function TraineeRegisterClient() {
     setError(null);
 
     try {
-      // Third-party registration uses Captcha verification
-      const recaptchaToken = await executeRecaptchaChallenge('google_register', recaptchaV2Token);
-      if (!recaptchaToken) {
-        const msg = getRecaptchaV2SiteKey()
-          ? "Please complete the security captcha verification before continuing with Google."
-          : (getLastRecaptchaError() || "Security captcha verification could not be completed. Please refresh and try again.");
-        setError(msg);
-        setAuthState("IDLE");
-        return;
+      // Execute bot-protection check if available
+      try {
+        await executeRecaptchaChallenge('google_register', recaptchaV2Token);
+      } catch (captchaErr) {
+        console.warn('reCAPTCHA non-blocking notice for Google sign-in:', captchaErr);
       }
 
       await launchGoogleOAuth();

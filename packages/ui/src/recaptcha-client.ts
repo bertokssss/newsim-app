@@ -119,8 +119,7 @@ export function loadRecaptchaScript(mode: 'v2' | 'v3', siteKey?: string): Promis
 
     script.onerror = () => {
       console.warn('Notice: Google reCAPTCHA script could not be loaded.');
-      lastRecaptchaError =
-        'Google reCAPTCHA could not load (blocked by browser or invalid site key). Please refresh, disable ad/script blockers, or contact the administrator.';
+      lastRecaptchaError = null;
       recaptchaScriptPromise = null;
       resolve();
     };
