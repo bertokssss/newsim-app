@@ -886,22 +886,37 @@ export async function calculateTraineeCourseGrade(params: {
         .order('created_at', { ascending: false });
 
       const existingCert = (existingCerts || [])[0];
+      const issuedIso = new Date().toISOString();
+      const expiresDate = new Date();
+      expiresDate.setFullYear(expiresDate.getFullYear() + 5);
+      const expiresIso = expiresDate.toISOString();
 
       if (!existingCert) {
         const certNumber = `NEWSIM-${(course?.code || 'STCW').toUpperCase()}-${new Date().getFullYear()}-${crypto.randomInt(1000, 10000)}`;
+        const verHash = crypto
+          .createHash('sha256')
+          .update(`${certNumber}:${traineeId}:${courseId}`)
+          .digest('hex')
+          .slice(0, 24)
+          .toUpperCase();
         await supabaseAdmin.from('certificates').insert({
           trainee_id: traineeId,
           course_id: courseId,
           enrollment_id: enr.id,
           certificate_number: certNumber,
           status: 'ISSUED',
-          issued_at: new Date().toISOString(),
+          issued_at: issuedIso,
+          expires_at: expiresIso,
+          qr_code: `V-${certNumber}`,
+          verification_hash: verHash,
         });
       } else if (existingCert.status !== 'REVOKED' && (existingCert.status === 'WITHHELD' || existingCert.status === 'PENDING')) {
         await supabaseAdmin
           .from('certificates')
           .update({
             status: 'ISSUED',
+            issued_at: issuedIso,
+            expires_at: expiresIso,
             enrollment_id: existingCert.enrollment_id || enr.id,
           })
           .eq('id', existingCert.id);

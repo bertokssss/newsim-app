@@ -108,8 +108,9 @@ export default function LearningClient() {
     if (activeLesson.isRead) {
       const assessmentId = activeLesson.moduleAssessment?.id;
       const courseId = activeLesson.courseId || rawCourseId;
-      if (assessmentId && !activeLesson.moduleAssessment?.isAttempted) {
-        router.push(`/assessments?assessmentId=${assessmentId}&courseId=${courseId}`);
+      if (assessmentId && !activeLesson.moduleAssessment?.isPassed) {
+        const retakeSuffix = activeLesson.moduleAssessment?.isAttempted ? '&retake=1' : '';
+        router.push(`/assessments?assessmentId=${assessmentId}&courseId=${courseId}${retakeSuffix}`);
       }
       return;
     }
@@ -414,7 +415,7 @@ export default function LearningClient() {
                     key={lesson.id}
                     onClick={() => {
                       if (lesson.isLocked) {
-                        alert(lesson.lockReason || 'This module is locked. Modules unlock 1 per day.');
+                        alert(lesson.lockReason || 'Complete the previous module first to unlock this module.');
                         return;
                       }
                       setActiveLesson(lesson);
@@ -452,20 +453,20 @@ export default function LearningClient() {
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="text-xs font-sans truncate line-clamp-1">
-                        Day {lesson.dayNumber || idx + 1}. {lesson.title}
+                        {lesson.title}
                       </p>
                       <span className="text-[10px] font-mono text-slate-500 block mt-0.5">
                         {lesson.isCompleted
                           ? '✓ Completed'
+                          : lesson.moduleAssessment?.isAttempted && !lesson.moduleAssessment?.isPassed
+                          ? `Reattempt Quiz (${lesson.moduleAssessment?.score ?? 0}%)`
                           : lesson.isRead
                           ? 'Assessment Ready'
                           : lesson.isFailed
-                          ? `Assessment Not Passed (${lesson.moduleAssessment?.score ?? 0}%)`
+                          ? `Reattempt Required (${lesson.moduleAssessment?.score ?? 0}%)`
                           : lesson.isLocked
                           ? `🔒 Locked (Complete previous module)`
-                          : lesson.isDueToday
-                          ? 'Unlocked • Ready to Start'
-                          : 'Theory Guide'} • {lesson.readingMinutes || 45} mins
+                          : 'Available'} • {lesson.readingMinutes || 45} mins
                       </span>
                     </div>
                   </button>
@@ -508,17 +509,17 @@ export default function LearningClient() {
                     {postTest.isPassed ? (
                       <span className="text-[10px] text-emerald-600 font-mono">✓ Passed</span>
                     ) : postTest.isAttempted ? (
-                      <span className="text-[10px] text-indigo-600 font-mono">Attempted</span>
+                      <span className="text-[10px] text-amber-600 font-mono">Reattempt</span>
                     ) : null}
                   </div>
                   <span className="text-[10px] font-mono text-slate-500 block mt-0.5">
                     {postTest.isPassed
                       ? (!requiresPractical ? 'Full Modular Completed ✓' : 'Unlocked: Proceed to Course Practical')
                       : postTest.isAttempted
-                      ? `Attempt recorded (${postTest.score ?? 0}%)`
+                      ? `Failed (${postTest.score ?? 0}%) • Reattempt available`
                       : allModulesRead
-                      ? 'Unlocked — 1 Attempt Only'
-                      : `Locked • Complete all daily modules`}
+                      ? 'Unlocked • Ready to Take'
+                      : `Locked • Complete all course modules`}
                   </span>
                 </div>
               </button>
@@ -802,44 +803,78 @@ export default function LearningClient() {
               /* ===== Post-Test Ready: answered in the Assessments Center, not in the Learning Player ===== */
               <div className="rounded-3xl border border-indigo-500/30 bg-gradient-to-br from-indigo-500/5 to-sky-500/5 dark:bg-[#0c1a2c] p-8 sm:p-12 text-center space-y-5 animate-in fade-in duration-300">
                 <div className="w-16 h-16 rounded-2xl bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 mx-auto flex items-center justify-center border border-indigo-500/30">
-                  {postTest.isAttempted ? <CheckCircle2 className="w-8 h-8 text-emerald-500" /> : <GraduationCap className="w-8 h-8" />}
+                  {postTest.isPassed ? (
+                    <CheckCircle2 className="w-8 h-8 text-emerald-500" />
+                  ) : (
+                    <GraduationCap className="w-8 h-8" />
+                  )}
                 </div>
                 <div className="space-y-2">
                   <div className="flex flex-wrap justify-center gap-2">
                     <span className="px-3 py-1 rounded-full text-xs font-mono font-bold uppercase bg-indigo-500/20 text-indigo-700 dark:text-indigo-300">
-                      {postTest.isAttempted ? 'Post-Test Submitted' : 'Course Post-Test Unlocked'}
+                      {postTest.isPassed
+                        ? 'Post-Test Passed'
+                        : postTest.isAttempted
+                        ? 'Reattempt Available'
+                        : 'Course Post-Test Unlocked'}
                     </span>
                     <span className="px-3 py-1 rounded-full text-xs font-mono font-bold bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30">
-                      1 Attempt Only
+                      {postTest.isPassed
+                        ? `Score: ${postTest.score ?? 0}%`
+                        : postTest.isAttempted
+                        ? `Last Score: ${postTest.score ?? 0}% (Passing: ${postTest.passingScore || 75}%)`
+                        : `Passing: ${postTest.passingScore || 75}%`}
                     </span>
                   </div>
                   <h2 className="text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-[#F8FAFC] font-heading">
                     {postTest.title}
                   </h2>
                   <p className="text-xs text-slate-600 dark:text-slate-400 max-w-md mx-auto leading-relaxed">
-                    {postTest.isAttempted
-                      ? `Your single attempt was recorded (${postTest.score ?? 0}%). Your attendance has been logged to your instructor's practical training roster.`
-                      : 'All modules are read. The Course Post-Test is answered in the Assessments Center. Submitting it records your attendance in your instructor\u2019s practical training roster.'}
+                    {postTest.isPassed
+                      ? (!requiresPractical
+                        ? `You passed with ${postTest.score ?? 0}%. All requirements for this Full Modular course are satisfied — visit Certificates to view your issued STCW certificate.`
+                        : `You passed with ${postTest.score ?? 0}%. Your attendance has been logged to your instructor's practical training roster.`)
+                      : postTest.isAttempted
+                      ? `Your previous attempt scored ${postTest.score ?? 0}%, which is below the passing mark. You may reattempt the Course Post-Test now to earn your certificate.`
+                      : (!requiresPractical
+                        ? 'All modules are read. Pass the Course Post-Test in the Assessments Center to finalize your grades and earn your certificate.'
+                        : 'All modules are read. Pass the Course Post-Test in the Assessments Center to record your theoretical completion for practical training.')}
                   </p>
                 </div>
 
                 <div className="pt-2 flex flex-wrap justify-center gap-3">
                   <Link
-                    href={`/assessments?assessmentId=${postTest.id}&courseId=${activeLesson?.courseId || rawCourseId}`}
+                    href={`/assessments?assessmentId=${postTest.id}&courseId=${activeLesson?.courseId || rawCourseId}${postTest.isAttempted && !postTest.isPassed ? '&retake=1' : ''}`}
                     className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs shadow-md transition-all"
                   >
                     <Award className="w-4 h-4" />
-                    <span>{postTest.isAttempted ? 'View Result in Assessments' : 'Take Post-Test in Assessments Center'}</span>
+                    <span>
+                      {postTest.isPassed
+                        ? 'View Result in Assessments'
+                        : postTest.isAttempted
+                        ? 'Reattempt Post-Test in Assessments'
+                        : 'Take Post-Test in Assessments Center'}
+                    </span>
                     <ArrowRight className="w-3.5 h-3.5" />
                   </Link>
-                  {postTest.isAttempted && (
-                    <Link
-                      href="/schedules"
-                      className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl border border-slate-200/80 dark:border-slate-800 text-sky-600 dark:text-sky-400 font-bold text-xs transition-all"
-                    >
-                      <Calendar className="w-4 h-4" />
-                      <span>Practical Training Schedule</span>
-                    </Link>
+                  {postTest.isPassed && (
+                    !requiresPractical ? (
+                      <Link
+                        href="/certificates"
+                        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md transition-all"
+                      >
+                        <Award className="w-4 h-4" />
+                        <span>View My Certificate</span>
+                      </Link>
+                    ) : (
+                      <Link
+                        href="/schedules"
+                        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl border border-slate-200/80 dark:border-slate-800 text-sky-600 dark:text-sky-400 font-bold text-xs transition-all"
+                      >
+                        <Calendar className="w-4 h-4" />
+                        <span>Practical Training Schedule</span>
+                      </Link>
+                    )
                   )}
                   <button
                     onClick={() => setPostTestOpen(false)}
@@ -1061,21 +1096,28 @@ export default function LearningClient() {
                               {activeLesson.moduleAssessment.title || 'Module Competency Pre-Test'}
                             </h3>
                             <p className="text-[11px] font-mono text-slate-500">
-                              Total Questions: {activeLesson.moduleAssessment.questionsCount || activeLesson.moduleAssessment.questions?.length || 10} • Passing Score: {activeLesson.moduleAssessment.passingScore || 75}% • 1 Attempt Allowed
+                              Total Questions: {activeLesson.moduleAssessment.questionsCount || activeLesson.moduleAssessment.questions?.length || 10} • Passing Score: {activeLesson.moduleAssessment.passingScore || 75}% • Reattempts Allowed if Failed
                             </p>
                           </div>
                         </div>
 
                         {activeLesson.moduleAssessment.isAttempted ? (
-                          <span className="px-3 py-1 rounded-full text-xs font-mono font-bold bg-emerald-500/15 text-emerald-600 border border-emerald-500/30 flex items-center gap-1 self-start sm:self-auto">
+                          <span
+                            className={`px-3 py-1 rounded-full text-xs font-mono font-bold flex items-center gap-1 self-start sm:self-auto ${
+                              activeLesson.moduleAssessment.isPassed
+                                ? 'bg-emerald-500/15 text-emerald-600 border border-emerald-500/30'
+                                : 'bg-rose-500/15 text-rose-600 border border-rose-500/30'
+                            }`}
+                          >
                             <CheckCircle className="w-3.5 h-3.5" />
                             <span>
-                              Score: {activeLesson.moduleAssessment.scoreDisplay || `${Math.round(((activeLesson.moduleAssessment.score ?? 0) * (activeLesson.moduleAssessment.questionsCount || 10)) / 100)}/${activeLesson.moduleAssessment.questionsCount || 10} (${activeLesson.moduleAssessment.score ?? 0}%)`}
+                              {activeLesson.moduleAssessment.isPassed ? 'Passed: ' : 'Failed: '}
+                              {activeLesson.moduleAssessment.scoreDisplay || `${Math.round(((activeLesson.moduleAssessment.score ?? 0) * (activeLesson.moduleAssessment.questionsCount || 10)) / 100)}/${activeLesson.moduleAssessment.questionsCount || 10} (${activeLesson.moduleAssessment.score ?? 0}%)`}
                             </span>
                           </span>
                         ) : (
                           <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 self-start sm:self-auto">
-                            1 Attempt Available
+                            Quiz Ready
                           </span>
                         )}
                       </div>
@@ -1088,19 +1130,28 @@ export default function LearningClient() {
                             <span>Trainee Assessment Center</span>
                           </div>
                           <p className="text-[11px] text-slate-600 dark:text-slate-300 font-sans max-w-md">
-                            {activeLesson.moduleAssessment.isAttempted
-                              ? `Your single attempt has been recorded with a score of ${activeLesson.moduleAssessment.score ?? 0}%. You can review the evaluation on the Assessments page.`
+                            {activeLesson.moduleAssessment.isPassed
+                              ? `You passed this assessment with ${activeLesson.moduleAssessment.score ?? 0}%. You can review your evaluation on the Assessments page.`
+                              : activeLesson.moduleAssessment.isAttempted
+                              ? `Your last attempt scored ${activeLesson.moduleAssessment.score ?? 0}% (below ${activeLesson.moduleAssessment.passingScore || 75}%). Click Reattempt to retake it on the Assessments page.`
                               : 'Under STCW training evaluation procedures, competency tests are taken on the official Assessments page (located in the left sidebar).'}
                           </p>
                         </div>
 
                         <button
                           onClick={() => {
-                            router.push(`/assessments?assessmentId=${activeLesson.moduleAssessment.id}&courseId=${activeLesson.courseId || rawCourseId}`);
+                            const retakeSuffix = activeLesson.moduleAssessment.isAttempted && !activeLesson.moduleAssessment.isPassed ? '&retake=1' : '';
+                            router.push(`/assessments?assessmentId=${activeLesson.moduleAssessment.id}&courseId=${activeLesson.courseId || rawCourseId}${retakeSuffix}`);
                           }}
                           className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 via-amber-700 to-amber-600 hover:from-amber-700 hover:to-amber-800 text-white font-bold text-xs shadow-md shadow-amber-600/25 transition-all cursor-pointer shrink-0"
                         >
-                          <span>{activeLesson.moduleAssessment.isAttempted ? 'View in Assessments Page' : 'Go to Assessments Page to Answer'}</span>
+                          <span>
+                            {activeLesson.moduleAssessment.isPassed
+                              ? 'View in Assessments Page'
+                              : activeLesson.moduleAssessment.isAttempted
+                              ? 'Reattempt in Assessments Page'
+                              : 'Go to Assessments Page to Answer'}
+                          </span>
                           <ArrowRight className="w-3.5 h-3.5" />
                         </button>
                       </div>
@@ -1129,35 +1180,53 @@ export default function LearningClient() {
                       {postTest.isPassed
                         ? 'Course Post-Test Passed ✓'
                         : postTest.isAttempted
-                        ? 'Post-Test Attempt Logged'
+                        ? `Post-Test Needs Reattempt (${postTest.score ?? 0}%)`
                         : 'Final Step: Take Course Post-Test'}
                     </h3>
                     <p className="text-xs text-slate-600 dark:text-slate-300 font-sans">
                       {postTest.isPassed
-                        ? 'All theory requirements satisfied! Your attendance is recorded in the instructor roster. Proceed to your scheduled practical training session.'
+                        ? (!requiresPractical
+                          ? 'All Full Modular requirements are complete! Visit Certificates to view or download your STCW completion certificate.'
+                          : 'All theory requirements satisfied! Your attendance is recorded in the instructor roster. Proceed to your scheduled practical training session.')
                         : postTest.isAttempted
-                        ? 'Your post-test attempt and attendance record have been logged for your instructor.'
-                        : 'All course modules are read! You can now take the comprehensive 1-attempt course post-test to qualify for practical training.'}
+                        ? 'Your last post-test attempt did not reach the passing score. Reattempt the Course Post-Test to pass and qualify for certification.'
+                        : (!requiresPractical
+                          ? 'All course modules are read! Pass the Course Post-Test to finalize your grades and unlock your certificate.'
+                          : 'All course modules are read! Pass the comprehensive course post-test to qualify for practical training.')}
                     </p>
                   </div>
 
                   <div className="shrink-0">
                     {postTest.isPassed ? (
-                      <Link
-                        href="/schedules"
-                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 hover:opacity-95 text-white font-bold text-xs shadow-md shadow-sky-500/20 transition-all"
-                      >
-                        <Calendar className="w-4 h-4" />
-                        <span>View Training Schedule</span>
-                        <ArrowRight className="w-3.5 h-3.5" />
-                      </Link>
+                      !requiresPractical ? (
+                        <Link
+                          href="/certificates"
+                          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md shadow-emerald-500/20 transition-all"
+                        >
+                          <Award className="w-4 h-4" />
+                          <span>View My Certificate</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </Link>
+                      ) : (
+                        <Link
+                          href="/schedules"
+                          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 hover:opacity-95 text-white font-bold text-xs shadow-md shadow-sky-500/20 transition-all"
+                        >
+                          <Calendar className="w-4 h-4" />
+                          <span>View Training Schedule</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </Link>
+                      )
                     ) : (
                       <button
-                        onClick={() => router.push(`/assessments?assessmentId=${postTest.id}&courseId=${activeLesson?.courseId || rawCourseId}`)}
+                        onClick={() => {
+                          const retakeSuffix = postTest.isAttempted && !postTest.isPassed ? '&retake=1' : '';
+                          router.push(`/assessments?assessmentId=${postTest.id}&courseId=${activeLesson?.courseId || rawCourseId}${retakeSuffix}`);
+                        }}
                         className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-sky-600 hover:opacity-95 text-white font-bold text-xs shadow-md shadow-indigo-600/20 transition-all cursor-pointer"
                       >
                         <GraduationCap className="w-4 h-4" />
-                        <span>{postTest.isAttempted ? 'View in Assessments' : 'Take Course Post-Test in Assessments'}</span>
+                        <span>{postTest.isAttempted ? 'Reattempt Post-Test in Assessments' : 'Take Course Post-Test in Assessments'}</span>
                         <ArrowRight className="w-3.5 h-3.5" />
                       </button>
                     )}

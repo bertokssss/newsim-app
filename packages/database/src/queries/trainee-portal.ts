@@ -1646,7 +1646,7 @@ export async function getTraineeSchedulesList(traineeId: string, onNotifyEmail?:
         dailyModules.push({
           id: `mod-sched-${m.moduleId}`,
           type: 'DAILY_ONLINE_MODULE',
-          sessionCode: `DAY-${m.dayNumber}`,
+          sessionCode: `MODULE-${m.dayNumber}`,
           courseId: cid,
           courseCode: cObj.code || 'STCW',
           courseTitle: cObj.name || 'Maritime Training Program',
@@ -1654,14 +1654,14 @@ export async function getTraineeSchedulesList(traineeId: string, onNotifyEmail?:
           dayNumber: m.dayNumber,
           date: m.scheduledDate,
           formattedDate: m.formattedDate,
-          time: 'Daily Online (Complete before 11:59 PM)',
+          time: 'Online LMS (Self-Paced)',
           startTime: '00:00',
           endTime: '23:59',
           startAt: `${m.scheduledDate}T00:00:00+08:00`,
           endAt: `${m.scheduledDate}T23:59:59+08:00`,
           room: 'Online LMS Player',
-          instructorName: 'Daily Online Curriculum',
-          status: m.status, // 'COMPLETED' | 'AVAILABLE' (Due Today) | 'LOCKED' | 'FAILED'
+          instructorName: 'Online Modular Curriculum',
+          status: m.status, // 'COMPLETED' | 'AVAILABLE' | 'LOCKED' | 'FAILED'
           isDueToday: m.isDueToday,
           isCompleted: m.isCompleted,
           isFailed: m.isFailed,
@@ -1670,7 +1670,7 @@ export async function getTraineeSchedulesList(traineeId: string, onNotifyEmail?:
           failureReason: m.failureReason,
           centerName: 'NEWSIM Online Academy',
           isSetTime: false,
-          note: 'Online Theory Module: 1 module unlocked per day with its quiz. Must be finished today to prevent automatic failure.',
+          note: 'Online Theory Module: Read lesson content and pass the module quiz (reattempt available if score is below passing threshold).',
         });
       });
     } catch (e) {
@@ -3229,7 +3229,9 @@ export async function syncTraineeDailyModules(
 
   const attemptsByAsm = new Map<string, any>();
   attempts.forEach((att: any) => {
-    if (!attemptsByAsm.has(att.assessment_id) || att.passed === true || att.status === 'PASSED') {
+    const existing = attemptsByAsm.get(att.assessment_id);
+    const existingPassed = existing?.passed === true || existing?.status === 'PASSED';
+    if (!existing || (!existingPassed && (att.passed === true || att.status === 'PASSED'))) {
       attemptsByAsm.set(att.assessment_id, att);
     }
   });
@@ -3257,7 +3259,7 @@ export async function syncTraineeDailyModules(
       : 75;
 
     const isAsmPassed = asmAttempt ? (asmAttempt.passed === true || asmAttempt.status === 'PASSED' || Number(asmAttempt.score) >= passingScore) : false;
-    const isAsmFailed = asmAttempt ? (asmAttempt.passed === false || asmAttempt.status === 'FAILED' || Number(asmAttempt.score) < passingScore) : false;
+    const isAsmFailed = Boolean(asmAttempt) && !isAsmPassed;
     const isRead = completedModuleIds.has(mod.id) || isAsmPassed;
     const isCompleted = isRead && (modAsm ? isAsmPassed : isRead);
 
@@ -3267,14 +3269,14 @@ export async function syncTraineeDailyModules(
 
     if (isCompleted) {
       status = 'COMPLETED';
-    } else if (isAsmFailed) {
-      status = 'FAILED';
-      failureReason = `Failed module assessment (scored ${asmAttempt?.score ?? 0}%, minimum ${passingScore}% required)`;
-    } else if (i === 0 || previousModuleDone) {
-      // Unlock Module 1 immediately and unlock each subsequent module as soon as the previous module is completed
+    } else if (i === 0 || previousModuleDone || isAsmFailed) {
+      // Keep module AVAILABLE when unlocked or when a quiz attempt scored below passing so the trainee can reattempt
       status = 'AVAILABLE';
+      if (isAsmFailed) {
+        failureReason = `Previous attempt scored ${asmAttempt?.score ?? 0}% (minimum ${passingScore}% required — reattempt available)`;
+      }
 
-      if (!existingRow?.email_notified_at && scheduledDate === todayStr) {
+      if (!existingRow?.email_notified_at && scheduledDate === todayStr && !isAsmFailed) {
         if (onNotifyEmail && traineeEmail) {
           try {
             await onNotifyEmail({
@@ -3306,10 +3308,10 @@ export async function syncTraineeDailyModules(
       }
     } else {
       status = 'LOCKED';
-      lockReason = `Locked: Complete Day ${i} first to unlock Day ${dayNumber} (${formattedDate}).`;
+      lockReason = `Locked: Complete Module ${i} first to unlock Module ${dayNumber}.`;
     }
 
-    previousModuleDone = status === 'COMPLETED' || status === 'FAILED' || isRead;
+    previousModuleDone = status === 'COMPLETED' || isRead;
 
     trackingUpserts.push({
       trainee_id: resolvedId,
@@ -3320,7 +3322,7 @@ export async function syncTraineeDailyModules(
       status,
       email_notified_at: status === 'AVAILABLE' && !existingRow?.email_notified_at ? new Date().toISOString() : existingRow?.email_notified_at || null,
       completed_at: isCompleted ? (existingRow?.completed_at || new Date().toISOString()) : null,
-      failed_at: status === 'FAILED' ? (existingRow?.failed_at || new Date().toISOString()) : null,
+      failed_at: null,
       failure_reason: failureReason,
       updated_at: new Date().toISOString(),
     });
@@ -3335,7 +3337,7 @@ export async function syncTraineeDailyModules(
       status,
       isDueToday: status === 'AVAILABLE',
       isCompleted: status === 'COMPLETED',
-      isFailed: status === 'FAILED',
+      isFailed: Boolean(isAsmFailed),
       isLocked: status === 'LOCKED',
       lockReason,
       failureReason,
@@ -3545,7 +3547,9 @@ export async function getTraineeLearningMaterials(
       ) {
         return;
       }
-      if (!attemptsMap.has(att.assessment_id) || att.status === 'PASSED') {
+      const existing = attemptsMap.get(att.assessment_id);
+      const existingPassed = existing?.status === 'PASSED';
+      if (!existing || (!existingPassed && att.status === 'PASSED')) {
         attemptsMap.set(att.assessment_id, att);
       }
     });
@@ -3563,9 +3567,12 @@ export async function getTraineeLearningMaterials(
   const postTestCorrectCount = postTestAttempt
     ? Math.round(((Number(postTestAttempt.score) || 0) * postTestQuestionsCount) / 100)
     : null;
+  const isPostTestPassedFlag = Boolean(
+    postTestAttempt && (postTestAttempt.status === 'PASSED' || Number(postTestAttempt.score) >= postTestPassingScore)
+  );
   const postTestObj = rawPostTest ? {
     id: rawPostTest.id,
-    title: rawPostTest.title,
+    title: sanitizeModularAssessmentTitle(rawPostTest.title, isInHouse),
     description: rawPostTest.description || (
       isInHouse
         ? 'Comprehensive modular written evaluation required to complete this Modular / In-House Course.'
@@ -3579,7 +3586,8 @@ export async function getTraineeLearningMaterials(
     correctCount: postTestCorrectCount,
     scoreDisplay: postTestAttempt ? `${postTestCorrectCount}/${postTestQuestionsCount} (${postTestAttempt.score ?? 0}%)` : null,
     isAttempted: Boolean(postTestAttempt),
-    isPassed: postTestAttempt?.status === 'PASSED' || (Number(postTestAttempt?.score) >= postTestPassingScore),
+    isPassed: isPostTestPassedFlag,
+    canRetry: Boolean(postTestAttempt) && !isPostTestPassedFlag,
     score: postTestAttempt?.score ?? null,
     submittedAt: postTestAttempt?.submitted_at ?? null,
     isLocked: false,
@@ -3609,9 +3617,10 @@ export async function getTraineeLearningMaterials(
     const passThreshold = Math.max(75, rawPass);
     const modQCount = ((a.assessment_questions || []) as any[]).length || 10;
     const modCorrectCount = att ? Math.round(((Number(att.score) || 0) * modQCount) / 100) : null;
+    const modIsPassed = Boolean(att && (att.status === 'PASSED' || Number(att.score) >= passThreshold));
     moduleAsmMap.set(a.module_id, {
       id: a.id,
-      title: a.title,
+      title: sanitizeModularAssessmentTitle(a.title, isInHouse),
       description: a.description,
       type: a.assessment_type || 'QUIZ',
       passingScore: passThreshold,
@@ -3621,7 +3630,8 @@ export async function getTraineeLearningMaterials(
       correctCount: modCorrectCount,
       scoreDisplay: att ? `${modCorrectCount}/${modQCount} (${att.score ?? 0}%)` : null,
       isAttempted: Boolean(att),
-      isPassed: att?.status === 'PASSED' || (Number(att?.score) >= passThreshold),
+      isPassed: modIsPassed,
+      canRetry: Boolean(att) && !modIsPassed,
       score: att?.score ?? null,
       submittedAt: att?.submitted_at ?? null,
       questions: ((a.assessment_questions || []) as any[])
@@ -3667,10 +3677,10 @@ export async function getTraineeLearningMaterials(
       const isFailed = Boolean(dailyInfo?.isFailed);
       const failureReason = dailyInfo?.failureReason || null;
 
-      // Module is locked if it's scheduled for a future day or prerequisite was not completed
+      // Module is locked if prerequisite was not completed
       const isModuleLocked = dailyStatus === 'LOCKED' || (!previousModulePassed && dailyStatus !== 'COMPLETED' && dailyStatus !== 'FAILED');
       const moduleLockReason = dailyInfo?.lockReason || (isModuleLocked
-        ? `Locked: Scheduled for Day ${dayNumber} (${formattedDate}). Under STCW daily pacing rules, 1 module unlocks per day.`
+        ? `Locked: Complete ${previousModuleName || `Module ${mIdx}`} first to unlock Module ${dayNumber}.`
         : null);
       const exposedModQuiz = isModuleLocked && modQuiz ? { ...modQuiz, questions: [] } : modQuiz;
 
@@ -3772,10 +3782,10 @@ export async function getTraineeLearningMaterials(
   // Final Course Post-Test lock state: Post-test is only unlocked after all module materials and quizzes are completed/attempted
   if (postTestObj) {
     const allModulesFinished = dailySyncResults.length > 0 && dailySyncResults.every((d) => d.status === 'COMPLETED' || d.status === 'FAILED');
-    postTestObj.isLocked = !allModulesFinished;
-    postTestObj.lockReason = allModulesFinished
-      ? null
-      : 'Comprehensive post-test is locked: All daily modules and assessments must be completed before taking the post-test.';
+    postTestObj.isLocked = postTestObj.isAttempted ? false : !allModulesFinished;
+    postTestObj.lockReason = postTestObj.isLocked
+      ? 'Comprehensive post-test is locked: Complete all course modules and quizzes first.'
+      : null;
     if (postTestObj.isLocked) {
       postTestObj.questions = [];
     }
@@ -4098,7 +4108,7 @@ export async function getTraineeAssessmentsList(traineeId: string, search?: stri
     .from('assessments')
     .select(`
       *,
-      courses (id, code, name),
+      courses (id, code, name, category, practical_days),
       course_modules (id, title, sort_order),
       assessment_questions (
         id,
@@ -4131,7 +4141,7 @@ export async function getTraineeAssessmentsList(traineeId: string, search?: stri
   const [attemptsRes, readModuleIds, modulesRes, trackingRes] = await Promise.all([
     supabaseAdmin
       .from('assessment_attempts')
-      .select('id, assessment_id, score, status, passed, submitted_at')
+      .select('id, assessment_id, attempt_number, score, status, passed, submitted_at')
       .eq('trainee_id', resolvedId)
       .order('submitted_at', { ascending: false }),
     getReadModuleIds(resolvedId, courseIds),
@@ -4156,8 +4166,12 @@ export async function getTraineeAssessmentsList(traineeId: string, search?: stri
   trackRows.forEach((tr: any) => trackMap.set(tr.module_id, tr));
 
   const attemptsMap = new Map<string, any>();
+  const attemptCountMap = new Map<string, number>();
   attempts.forEach((att: any) => {
-    if (!attemptsMap.has(att.assessment_id) || att.status === 'PASSED' || att.passed === true) {
+    attemptCountMap.set(att.assessment_id, (attemptCountMap.get(att.assessment_id) || 0) + 1);
+    const existing = attemptsMap.get(att.assessment_id);
+    const existingPassed = existing?.status === 'PASSED' || existing?.passed === true;
+    if (!existing || (!existingPassed && (att.status === 'PASSED' || att.passed === true))) {
       attemptsMap.set(att.assessment_id, att);
     }
   });
@@ -4179,22 +4193,22 @@ export async function getTraineeAssessmentsList(traineeId: string, search?: stri
 
   let assessments = (data || []).map((a: any) => {
     const att = attemptsMap.get(a.id);
+    const courseRel = Array.isArray(a.courses) ? a.courses[0] : a.courses;
+    const isFullModularCourse = isInHouseModularCourse(courseRel?.category, courseRel?.practical_days);
     const passingThreshold = a.passing_score != null && !isNaN(Number(a.passing_score)) ? Number(a.passing_score) : 75;
     const isPassed = att ? (att.status === 'PASSED' || att.passed === true || (Number(att.score) >= passingThreshold)) : false;
     const isAttempted = Boolean(att);
     const userAnswers = att ? (answersByAttempt.get(att.id) || {}) : {};
+    const attemptsUsed = attemptCountMap.get(a.id) || 0;
 
     let status = 'NOT_STARTED';
     if (isPassed) status = 'PASSED';
     else if (att) status = 'FAILED';
 
-    // Daily pacing & locking logic:
-    // 1 Module per day. Assessment for Day N unlocks with Day N.
-    // Missed daily modules automatically fail.
     let isLocked = false;
     let lockReason: string | null = null;
     let isDueToday = false;
-    let isFailed = false;
+    let isFailed = Boolean(att) && !isPassed;
     let dayNumber: number | null = null;
     let scheduledDate: string | null = null;
 
@@ -4203,31 +4217,26 @@ export async function getTraineeAssessmentsList(traineeId: string, search?: stri
       dayNumber = tr?.day_number ?? (a.course_modules as any)?.sort_order ?? 1;
       scheduledDate = tr?.scheduled_date ? formatReadableDateString(tr.scheduled_date) : null;
 
-      if (tr?.status === 'LOCKED') {
+      if (tr?.status === 'LOCKED' && !isAttempted) {
         isLocked = true;
-        lockReason = `Locked: Scheduled for Day ${dayNumber} (${scheduledDate || 'Tomorrow'}). Under STCW daily pacing rules, assessments unlock 1 per day.`;
-      } else if (tr?.status === 'FAILED') {
-        status = 'FAILED';
-        isFailed = true;
-        isLocked = false;
-        lockReason = tr?.failure_reason || 'Failed: Missed daily completion deadline.';
-      } else if (tr?.status === 'AVAILABLE') {
-        isDueToday = true;
-        const isRead = readModuleIds.has(a.module_id);
-        isLocked = !isRead && !isAttempted;
-        lockReason = isLocked ? 'Mark this module as read in the Learning Player to unlock' : null;
+        lockReason = `Locked: Complete Module ${Math.max(1, (dayNumber || 2) - 1)} first to unlock this assessment.`;
       } else {
         const isRead = readModuleIds.has(a.module_id);
+        isDueToday = tr?.status === 'AVAILABLE';
         isLocked = !isRead && !isAttempted;
         lockReason = isLocked ? 'Mark this module as read in the Learning Player to unlock' : null;
       }
     } else {
-      // Course Post-Test: Unlocks when all daily modules have concluded
+      // Course Post-Test: Unlocks when all module assessments have been completed (or already attempted)
+      const courseModules = allModules.filter((m: any) => m.course_id === a.course_id);
       const courseTrackings = trackRows.filter((t: any) => t.course_id === a.course_id);
       const allDailyDone = courseTrackings.length > 0 && courseTrackings.every((t: any) => t.status === 'COMPLETED' || t.status === 'FAILED');
-      isLocked = !allDailyDone;
-      lockReason = isLocked ? 'Comprehensive post-test is locked: Complete all daily theory modules first.' : null;
+      const allRead = courseModules.length > 0 && courseModules.every((m: any) => readModuleIds.has(m.id));
+      isLocked = !isAttempted && (!allDailyDone || !allRead);
+      lockReason = isLocked ? 'Comprehensive post-test is locked: Complete all course modules and quizzes first.' : null;
     }
+
+    const canRetry = !isPassed && (!isLocked || isAttempted);
 
     const rawQuestions = ((a.assessment_questions || []) as any[])
       .sort((q1, q2) => (q1.sort_order || 0) - (q2.sort_order || 0))
@@ -4249,7 +4258,7 @@ export async function getTraineeAssessmentsList(traineeId: string, search?: stri
       });
 
     const calculatedTotalPoints = rawQuestions.reduce((sum: number, q: any) => sum + (Number(q.points) || 1), 0);
-    const courseCode = a.courses?.code || 'STCW';
+    const courseCode = courseRel?.code || 'STCW';
     const moduleSortOrder = (a.course_modules as any)?.sort_order ?? null;
 
     let correctCount: number | null = null;
@@ -4265,11 +4274,12 @@ export async function getTraineeAssessmentsList(traineeId: string, search?: stri
     return {
       id: a.id,
       code: a.code || `${courseCode}-${a.module_id ? 'PRE' : 'POST'}`,
-      title: a.title,
+      title: sanitizeModularAssessmentTitle(a.title, isFullModularCourse),
       description: a.description || 'Official maritime competency evaluation under STCW standards.',
       courseId: a.course_id,
       courseCode,
-      courseTitle: a.courses?.name || 'Maritime Evaluation',
+      courseTitle: courseRel?.name || 'Maritime Evaluation',
+      requiresPractical: !isFullModularCourse,
       type: a.module_id ? 'PRE_TEST' : (a.assessment_type || 'EXAM'),
       durationMinutes: a.duration_minutes || 45,
       passingScore: passingThreshold,
@@ -4277,16 +4287,18 @@ export async function getTraineeAssessmentsList(traineeId: string, search?: stri
       status,
       isAttempted,
       isPassed,
+      canRetry,
+      attemptsUsed,
       score: att?.score != null ? Number(att.score) : null,
       correctCount,
       totalQuestions: rawQuestions.length,
       scoreDisplay: isAttempted && correctCount != null ? `${correctCount}/${rawQuestions.length} (${Number(att?.score) || 0}%)` : null,
       submittedAt: att?.submitted_at ?? null,
       attemptId: att?.id || null,
-      attemptsAllowed: 1, // Single attempt only!
+      attemptsAllowed: null,
       questionsCount: rawQuestions.length,
       moduleId: a.module_id || null,
-      moduleTitle: (a.course_modules as any)?.title || null,
+      moduleTitle: sanitizeModularAssessmentTitle((a.course_modules as any)?.title, isFullModularCourse) || null,
       moduleSortOrder,
       dayNumber,
       scheduledDate,
@@ -4348,7 +4360,7 @@ export async function submitTraineeAssessment(
     throw err;
   }
 
-  // 1 Attempt Only Enforcement: Check if a real attempt already exists (ignore synthetic deadline rows)
+  // Reattempt Policy: Check if trainee has already PASSED this assessment; failed attempts may be retaken
   const { data: rawExistingAttempts } = await supabaseAdmin
     .from('assessment_attempts')
     .select('id, score, status, passed, submitted_at')
@@ -4405,30 +4417,27 @@ export async function submitTraineeAssessment(
 
     if (assessment.module_id) {
       const modSync = dailySync.find((d) => d.moduleId === assessment.module_id);
-      if (modSync?.status === 'LOCKED') {
-        const err = new Error(modSync.lockReason || 'ASSESSMENT_LOCKED: Module is locked under STCW daily pacing rules.');
+      const isRetryingFailedAttempt = existingAttempts.length > 0;
+      if (modSync?.status === 'LOCKED' && !isRetryingFailedAttempt) {
+        const err = new Error(modSync.lockReason || 'ASSESSMENT_LOCKED: Complete the previous module first.');
         (err as any).code = 'ASSESSMENT_LOCKED';
         throw err;
       }
-      if (modSync?.isFailed || modSync?.status === 'FAILED') {
-        const err = new Error(modSync.failureReason || 'ASSESSMENT_LOCKED: Module assessment window has expired or failed.');
-        (err as any).code = 'ASSESSMENT_LOCKED';
-        throw err;
-      }
-      if (!readModuleIds.has(assessment.module_id)) {
+      if (!readModuleIds.has(assessment.module_id) && !isRetryingFailedAttempt) {
         const err = new Error('ASSESSMENT_LOCKED: Mark the module as read in the Learning Player first.');
         (err as any).code = 'ASSESSMENT_LOCKED';
         throw err;
       }
     } else {
+      const isRetryingPostTest = existingAttempts.length > 0;
       const { data: mods } = await supabaseAdmin
         .from('course_modules')
         .select('id')
         .eq('course_id', assessment.course_id);
       const allDailyFinished = dailySync.length === 0 || dailySync.every((d) => d.status === 'COMPLETED' || d.status === 'FAILED');
       const allRead = (mods || []).length > 0 && (mods || []).every((m: any) => readModuleIds.has(m.id));
-      if (!allDailyFinished || !allRead) {
-        const err = new Error('ASSESSMENT_LOCKED: Complete and read all daily modules before taking the Course Post-Test.');
+      if (!isRetryingPostTest && (!allDailyFinished || !allRead)) {
+        const err = new Error('ASSESSMENT_LOCKED: Complete and read all course modules before taking the Course Post-Test.');
         (err as any).code = 'ASSESSMENT_LOCKED';
         throw err;
       }
@@ -4555,9 +4564,10 @@ export async function submitTraineeAssessment(
   }
 
   // Update or insert into grades table via weighted course grade engine
+  let gradeCalcResult: any = null;
   if (assessment.course_id) {
     try {
-      await calculateTraineeCourseGrade({
+      gradeCalcResult = await calculateTraineeCourseGrade({
         traineeId: resolvedId,
         courseId: assessment.course_id,
       });
@@ -4572,10 +4582,10 @@ export async function submitTraineeAssessment(
       await supabaseAdmin
         .from('trainee_daily_module_tracking')
         .update({
-          status: isPassed ? 'COMPLETED' : 'UNLOCKED',
+          status: isPassed ? 'COMPLETED' : 'AVAILABLE',
           completed_at: isPassed ? new Date().toISOString() : null,
           failed_at: null,
-          failure_reason: !isPassed ? `Scored ${score}% (minimum ${passingScore}% required — retry available before deadline)` : null,
+          failure_reason: !isPassed ? `Scored ${score}% (minimum ${passingScore}% required — reattempt available before deadline)` : null,
           updated_at: new Date().toISOString(),
         })
         .eq('trainee_id', resolvedId)
@@ -4603,16 +4613,16 @@ export async function submitTraineeAssessment(
   }
 
   // Fetch course category to distinguish In-House Full Modular vs Safety and Other STCW Courses
-  let courseRow: { id: string; code: string; name: string; category: string | null } | null = null;
+  let courseRow: { id: string; code: string; name: string; category: string | null; practical_days?: number | null } | null = null;
   if (assessment?.course_id) {
     const { data: cRow } = await supabaseAdmin
       .from('courses')
-      .select('id, code, name, category')
+      .select('id, code, name, category, practical_days')
       .eq('id', assessment.course_id)
       .maybeSingle();
     courseRow = cRow || null;
   }
-  const isFullModularCourse = isInHouseModularCourse(courseRow?.category);
+  const isFullModularCourse = isInHouseModularCourse(courseRow?.category, courseRow?.practical_days);
 
   // If this was the Final Course Post-Test (module_id is null):
   // For Safety and Other STCW Courses, ensure practical training schedule exists for the specific enrolled course.
@@ -4760,10 +4770,16 @@ export async function submitTraineeAssessment(
     console.warn('Assessment notification dispatch notice:', notifErr);
   }
 
+  const certIssued = Boolean(gradeCalcResult?.finalStatus === 'PASSED');
+
   return {
     attemptId: data.id,
+    attemptNumber,
     score,
     passed: isPassed,
+    canRetry: !isPassed,
+    requiresPractical: !isFullModularCourse,
+    certificateIssued: certIssued,
     passingScore,
     earnedPoints,
     totalPoints,
@@ -4774,10 +4790,14 @@ export async function submitTraineeAssessment(
     feedback: isPassed
       ? (!assessment?.module_id
           ? (isFullModularCourse
-              ? `Congratulations! You passed the Comprehensive Modular Post-Test with a score of ${correctCount}/${qs ? qs.length : totalPoints} (${score}%). Because ${courseRow?.name || 'this course'} is a Modular / In-House Course, your records are now ready for Instructor Academic Record Review!`
+              ? certIssued
+                ? `Congratulations! You passed with ${correctCount}/${qs ? qs.length : totalPoints} (${score}%) and satisfied all course requirements. Your official certificate is now available!`
+                : `Congratulations! You passed the Comprehensive Modular Post-Test with a score of ${correctCount}/${qs ? qs.length : totalPoints} (${score}%). Your records are ready for Instructor Academic Record Review!`
               : `Congratulations! You passed the Course Post-Test with a score of ${correctCount}/${qs ? qs.length : totalPoints} (${score}%). Your course-specific Practical Assessment for ${courseRow?.name || 'this STCW course'} is now unlocked!`)
-          : `Competency verified! You passed the module assessment with a score of ${correctCount}/${qs ? qs.length : totalPoints} (${score}%, passing standard: ${passingScore}%).`)
-      : `You scored ${correctCount}/${qs ? qs.length : totalPoints} (${score}%). The STCW competency threshold requires at least ${passingScore}% (${Math.ceil(((qs ? qs.length : 10) * passingScore) / 100)}/${qs ? qs.length : 10}).`,
+          : certIssued
+            ? `Competency verified (${correctCount}/${qs ? qs.length : totalPoints}, ${score}%) and all course requirements are now passed. Your official certificate has been issued!`
+            : `Competency verified! You passed the module assessment with a score of ${correctCount}/${qs ? qs.length : totalPoints} (${score}%, passing standard: ${passingScore}%).`)
+      : `You scored ${correctCount}/${qs ? qs.length : totalPoints} (${score}%). The passing threshold is ${passingScore}% (${Math.ceil(((qs ? qs.length : 10) * passingScore) / 100)}/${qs ? qs.length : 10}). You can reattempt this assessment below to qualify for certification.`,
     questionResults,
   };
 }

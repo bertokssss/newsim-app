@@ -167,7 +167,7 @@ export default function SchedulesClient() {
             Personal Training Schedule
           </h1>
           <p className="text-xs sm:text-sm text-slate-600 dark:text-[#CBD5E1] font-sans mt-0.5">
-            Daily online theory modules (1 per day) and scheduled in-person practical simulator sessions.
+            Self-paced online theory modules (within your course activation window) and scheduled in-person practical training sessions.
           </p>
         </div>
 
@@ -239,11 +239,11 @@ export default function SchedulesClient() {
           <div className="p-3.5 rounded-2xl bg-white dark:bg-[#0c1a2c] border border-slate-200/80 dark:border-slate-800 space-y-1">
             <div className="flex items-center gap-2 font-bold text-slate-900 dark:text-[#F8FAFC]">
               <BookOpen className="w-3.5 h-3.5 text-sky-500" />
-              <span>Daily Online Modules (1 Per Day)</span>
+              <span>Online Theory Modules (3-Day Window)</span>
             </div>
             <p className="text-slate-600 dark:text-[#CBD5E1] font-sans leading-relaxed">
-              Online theory curriculum unlocks <strong>1 module per day</strong> along with its corresponding assessment.
-              You must finish both the lesson and the quiz before 11:59 PM today. If missed, the module automatically <span className="text-rose-600 dark:text-rose-400 font-bold">FAILS</span>.
+              Complete each sequential online theory module and pass its assessment within your course&apos;s 3-day activation window.
+              If a quiz is not passed on the first try, you may <span className="text-sky-600 dark:text-sky-400 font-bold">Reattempt</span> it in the Assessments Center.
             </p>
           </div>
 
@@ -253,8 +253,8 @@ export default function SchedulesClient() {
               <span>Set Time: In-Person Practical Simulator Drills</span>
             </div>
             <p className="text-slate-600 dark:text-[#CBD5E1] font-sans leading-relaxed">
-              The assigned set time (e.g. <strong>08:00 AM - 12:00 PM</strong>) is strictly for your <strong>in-person hands-on simulator session</strong> at the training center.
-              You must complete all daily modules and undergo practical evaluation to qualify for certificate issuance.
+              For courses with practical training, the assigned set time (e.g. <strong>08:00 AM - 12:00 PM</strong>) is strictly for your <strong>in-person hands-on session</strong> at the training center.
+              You must complete all online modules and assessments to qualify for practical evaluation and certificate issuance.
             </p>
           </div>
         </div>
@@ -281,7 +281,7 @@ export default function SchedulesClient() {
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
-            <span>Daily Online Modules (1/Day)</span>
+            <span>Online Theory Modules</span>
             {dueTodayCount > 0 && (
               <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500 text-white">
                 {dueTodayCount} Due
@@ -341,7 +341,7 @@ export default function SchedulesClient() {
             <h3 className="font-extrabold text-sm text-slate-900 dark:text-[#F8FAFC] font-heading">
               {filterMode === 'UPCOMING' ? 'Upcoming ' : ''}
               {activeTab === 'DAILY_MODULES'
-                ? 'Daily Online Theory Curriculum'
+                ? 'Online Theory Modules'
                 : activeTab === 'PRACTICAL'
                 ? 'In-Person Practical Simulator Drills (Set Time)'
                 : 'Training Timetable'}
@@ -428,7 +428,7 @@ export default function SchedulesClient() {
                                 : 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20'
                             }`}
                           >
-                            {isDaily ? `DAY ${s.dayNumber}` : 'IN-PERSON PRACTICAL'}
+                            {isDaily ? `MODULE ${s.dayNumber}` : 'IN-PERSON PRACTICAL'}
                           </span>
                           <span className="text-xs font-mono font-bold text-slate-900 dark:text-[#F8FAFC]">
                             {s.formattedDate || s.date}
@@ -465,7 +465,7 @@ export default function SchedulesClient() {
                           </span>
                           {isDaily ? (
                             <span className="text-[11px] text-slate-500">
-                              (Online LMS self-paced today)
+                              (Online LMS self-paced module)
                             </span>
                           ) : (
                             <span className="text-[11px] text-amber-600 dark:text-amber-400 font-bold">
@@ -475,8 +475,8 @@ export default function SchedulesClient() {
                         </div>
 
                         {isFailed && (
-                          <p className="text-xs font-mono text-rose-600 dark:text-rose-400 mt-1">
-                            ⚠ {s.failureReason || 'Module failed because it was not completed on its scheduled day.'}
+                          <p className="text-xs font-mono text-amber-600 dark:text-amber-400 mt-1">
+                            ⚠ {s.failureReason || 'Reattempt the module assessment in Assessments Center to complete this requirement.'}
                           </p>
                         )}
                         {isLocked && s.lockReason && (

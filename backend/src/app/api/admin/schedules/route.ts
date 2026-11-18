@@ -64,7 +64,7 @@ export async function POST(request: Request) {
       instructorName: instructor ? `${instructor.firstName} ${instructor.lastName}` : 'Capt. Arthur Bautista',
       centerId: center?.id || 'tc-01',
       centerName: center?.name || 'Manila Maritime Flagship',
-      room: room || 'Bridge Simulator Alpha',
+      room: room || 'Training Hall A',
       date: date || new Date().toISOString().split('T')[0],
       startTime: startTime || '08:00 AM',
       endTime: endTime || '12:00 PM',

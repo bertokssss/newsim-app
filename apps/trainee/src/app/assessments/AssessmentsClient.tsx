@@ -77,6 +77,10 @@ type Assessment = {
   scheduledDate?: string | null;
   isDueToday?: boolean;
   isFailed?: boolean;
+  canRetry?: boolean;
+  attemptsUsed?: number;
+  attemptsAllowed?: number | null;
+  requiresPractical?: boolean;
   questions: Question[];
   userAnswers?: Record<string, string>;
 };
@@ -91,6 +95,10 @@ type SubmissionResult = {
   totalQuestions?: number;
   isPostTest: boolean;
   alreadyAttempted?: boolean;
+  attemptNumber?: number;
+  canRetry?: boolean;
+  requiresPractical?: boolean;
+  certificateIssued?: boolean;
   feedback: string;
   questionResults?: QuestionResult[];
 };
@@ -100,6 +108,7 @@ export default function AssessmentsClient() {
   const searchParams = useSearchParams();
   const paramAssessmentId = searchParams.get('assessmentId');
   const paramCourseId = searchParams.get('courseId');
+  const paramRetake = searchParams.get('retake') === '1';
 
   const [assessments, setAssessments] = useState<Assessment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -140,17 +149,18 @@ export default function AssessmentsClient() {
     fetchAssessments();
   }, []);
 
-  const openExam = React.useCallback((asm: Assessment) => {
+  const openExam = React.useCallback((asm: Assessment, startRetake = false) => {
     if (asm.isLocked) return;
+    const isRetaking = startRetake && !asm.isPassed;
     setActiveExam(asm);
     setCurrentQuestionIndex(0);
     setViewMode('step');
     setShowReviewList(false);
-    setSelectedAnswers(asm.userAnswers || {});
+    setSelectedAnswers(isRetaking ? {} : asm.userAnswers || {});
     setSubmitError(null);
     setConfirmOpen(false);
 
-    if (asm.isAttempted) {
+    if (asm.isAttempted && !isRetaking) {
       const qResults: QuestionResult[] = asm.questions.map((q) => {
         const selectedChoiceId = (asm.userAnswers || {})[q.id] || null;
         const picked = q.options.find((opt) => opt.id === selectedChoiceId);
@@ -183,7 +193,11 @@ export default function AssessmentsClient() {
         totalQuestions: asm.questions.length,
         isPostTest: !asm.moduleId,
         alreadyAttempted: true,
-        feedback: `Your attempt was recorded with an official competency score of ${asm.score ?? 0}%.`,
+        canRetry: !asm.isPassed,
+        requiresPractical: asm.requiresPractical,
+        feedback: asm.isPassed
+          ? `Your attempt passed with an official score of ${asm.score ?? 0}%.`
+          : `Your latest attempt scored ${asm.score ?? 0}% (passing mark: ${asm.passingScore}%). You may reattempt this assessment.`,
         questionResults: qResults,
       });
     } else {
@@ -191,15 +205,26 @@ export default function AssessmentsClient() {
     }
   }, []);
 
+  const handleStartRetake = React.useCallback(() => {
+    if (!activeExam || activeExam.isPassed) return;
+    setSubmissionResult(null);
+    setSelectedAnswers({});
+    setCurrentQuestionIndex(0);
+    setViewMode('step');
+    setShowReviewList(false);
+    setSubmitError(null);
+    setConfirmOpen(false);
+  }, [activeExam]);
+
   // Auto-open the assessment that was just unlocked from the Learning Player
   useEffect(() => {
     if (loading || !paramAssessmentId || autoOpenedRef.current === paramAssessmentId) return;
     const target = assessments.find((a) => a.id === paramAssessmentId);
     if (target) {
       autoOpenedRef.current = paramAssessmentId;
-      openExam(target);
+      openExam(target, paramRetake);
     }
-  }, [loading, assessments, paramAssessmentId, openExam]);
+  }, [loading, assessments, paramAssessmentId, paramRetake, openExam]);
 
   // Group assessments by course, order: module pre-tests by syllabus order, post-test last
   const grouped = useMemo(() => {
@@ -242,7 +267,7 @@ export default function AssessmentsClient() {
   };
 
   const handleSubmitExam = async () => {
-    if (!activeExam || activeExam.isAttempted || submissionResult) return;
+    if (!activeExam || activeExam.isPassed || submissionResult) return;
     try {
       setSubmitting(true);
       setSubmitError(null);
@@ -257,6 +282,11 @@ export default function AssessmentsClient() {
         return;
       }
       setSubmissionResult(json.data);
+      if (json.data?.passed) {
+        setActiveExam((prev) => (prev ? { ...prev, isPassed: true, isAttempted: true, score: json.data.score } : prev));
+      } else {
+        setActiveExam((prev) => (prev ? { ...prev, isAttempted: true, isFailed: true, canRetry: true, score: json.data.score } : prev));
+      }
       setConfirmOpen(false);
       setShowReviewList(false);
       await fetchAssessments();
@@ -282,7 +312,7 @@ export default function AssessmentsClient() {
             Module Assessments &amp; Course Post-Test
           </h1>
           <p className="text-xs sm:text-sm text-slate-600 dark:text-[#CBD5E1] font-sans mt-0.5">
-            Theory curriculum is paced at 1 module per day. Each module assessment is due on its scheduled day (must complete before 11:59 PM to prevent automatic failure). Completing all modules qualifies you for the in-person practical simulator evaluation.
+            Complete each module quiz and the final course post-test to fulfill your theoretical competency requirements. If you score below the passing mark, you can reattempt the assessment until you pass and qualify for your certificate.
           </p>
         </div>
         <Link
@@ -331,7 +361,7 @@ export default function AssessmentsClient() {
                     : null;
                 const minPassQ = Math.ceil((totalQ * (asm.passingScore || 75)) / 100);
 
-                let badgeText = 'READY • 1 ATTEMPT';
+                let badgeText = 'READY';
                 let badgeClass = 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30';
                 if (asm.isAttempted) {
                   badgeText = asm.isPassed
@@ -341,13 +371,11 @@ export default function AssessmentsClient() {
                     ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
                     : 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/20';
                 } else if (asm.isFailed) {
-                  badgeText = 'FAILED';
+                  badgeText = 'REATTEMPT AVAILABLE';
                   badgeClass = 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30';
-                } else if (asm.isDueToday && !asm.isAttempted) {
-                  badgeText = 'UNLOCKED • 1 ATTEMPT';
-                  badgeClass = 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/40';
                 } else if (asm.isLocked) {
-                  badgeText = asm.dayNumber ? `LOCKED • MODULE ${asm.dayNumber}` : 'LOCKED';
+                  const modNum = asm.moduleSortOrder ?? asm.dayNumber;
+                  badgeText = modNum ? `LOCKED • MODULE ${modNum}` : 'LOCKED';
                   badgeClass = 'bg-slate-500/15 text-slate-500 dark:text-slate-400 border border-slate-500/20';
                 }
 
@@ -357,8 +385,6 @@ export default function AssessmentsClient() {
                     className={`relative rounded-3xl bg-white dark:bg-[#0c1a2c] border shadow-sm flex flex-col justify-between overflow-hidden transition-all ${
                       isHighlighted
                         ? 'border-slate-200/80 dark:border-slate-800 ring-2 ring-[#3BA7F2]/40'
-                        : asm.isDueToday
-                        ? 'border-amber-500/40 hover:border-amber-500'
                         : 'border-slate-200/80 dark:border-slate-800 hover:border-sky-500/40'
                     } ${asm.isLocked ? 'opacity-70' : ''}`}
                   >
@@ -371,7 +397,11 @@ export default function AssessmentsClient() {
                               : 'bg-sky-500/10 text-sky-700 dark:text-sky-400 border-sky-500/20'
                           }`}
                         >
-                          {isPostTest ? 'COURSE POST-TEST' : (asm.dayNumber ? `DAY ${asm.dayNumber} ASSESSMENT` : 'MODULE ASSESSMENT')}
+                          {isPostTest
+                            ? 'COURSE POST-TEST'
+                            : (asm.moduleSortOrder ?? asm.dayNumber)
+                            ? `MODULE ${asm.moduleSortOrder ?? asm.dayNumber} QUIZ`
+                            : 'MODULE ASSESSMENT'}
                         </span>
                         <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold uppercase ${badgeClass}`}>
                           {badgeText}
@@ -382,11 +412,6 @@ export default function AssessmentsClient() {
                         <h3 className="text-base font-extrabold text-slate-900 dark:text-[#F8FAFC] font-heading">{asm.title}</h3>
                         {asm.moduleTitle && (
                           <p className="text-[11px] text-slate-600 dark:text-[#CBD5E1] font-mono mt-1">Module: {asm.moduleTitle}</p>
-                        )}
-                        {asm.scheduledDate && (
-                          <p className="text-[10px] text-slate-500 font-mono mt-0.5">
-                            Scheduled Date: {asm.scheduledDate} {asm.isDueToday ? '• Due Today' : ''}
-                          </p>
                         )}
                       </div>
 
@@ -415,10 +440,12 @@ export default function AssessmentsClient() {
                         </div>
                       </div>
 
-                      {asm.isFailed && (
-                        <div className="p-3 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-[11px] font-mono text-rose-700 dark:text-rose-300 flex items-start gap-2">
-                          <AlertCircle className="w-4 h-4 mt-0.5 shrink-0 text-rose-600" />
-                          <span>Automatically failed: This module was not completed on its scheduled day. Single-attempt rule applies.</span>
+                      {(asm.isFailed || (asm.isAttempted && !asm.isPassed)) && (
+                        <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-[11px] font-mono text-amber-700 dark:text-amber-300 flex items-start gap-2">
+                          <AlertCircle className="w-4 h-4 mt-0.5 shrink-0 text-amber-600" />
+                          <span>
+                            Score below {asm.passingScore}% passing standard. You can reattempt this assessment now to pass and progress toward certification.
+                          </span>
                         </div>
                       )}
 
@@ -430,9 +457,13 @@ export default function AssessmentsClient() {
                       )}
                     </div>
 
-                    <div className="p-4 bg-slate-50 dark:bg-slate-900/60 border-t border-slate-200/80 dark:border-slate-800 flex items-center justify-between">
+                    <div className="p-4 bg-slate-50 dark:bg-slate-900/60 border-t border-slate-200/80 dark:border-slate-800 flex items-center justify-between gap-2">
                       <span className="text-[10px] font-mono text-slate-500">
-                        {asm.isAttempted ? '1 of 1 attempt used' : '1 attempt allowed'}
+                        {asm.isPassed
+                          ? `Passed (${asm.attemptsUsed || 1} attempt${(asm.attemptsUsed || 1) > 1 ? 's' : ''})`
+                          : asm.isAttempted
+                          ? `${asm.attemptsUsed || 1} attempt${(asm.attemptsUsed || 1) > 1 ? 's' : ''} • Reattempt available`
+                          : 'Reattempts allowed if failed'}
                       </span>
 
                       {asm.isLocked ? (
@@ -443,14 +474,26 @@ export default function AssessmentsClient() {
                           <BookOpen className="w-3.5 h-3.5" />
                           <span>Read Module</span>
                         </Link>
+                      ) : asm.isAttempted && !asm.isPassed ? (
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => openExam(asm, false)}
+                            className="inline-flex items-center gap-1 px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs hover:bg-slate-100 dark:hover:bg-white/5 cursor-pointer"
+                          >
+                            <span>Result</span>
+                          </button>
+                          <button
+                            onClick={() => openExam(asm, true)}
+                            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs shadow-sm transition-all cursor-pointer"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            <span>Reattempt</span>
+                          </button>
+                        </div>
                       ) : (
                         <button
-                          onClick={() => openExam(asm)}
-                          className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl font-bold text-xs shadow-sm transition-all cursor-pointer ${
-                            asm.isDueToday
-                              ? 'bg-amber-600 hover:bg-amber-500 text-white'
-                              : 'bg-sky-600 hover:bg-sky-500 text-white'
-                          }`}
+                          onClick={() => openExam(asm, false)}
+                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl font-bold text-xs shadow-sm transition-all cursor-pointer bg-sky-600 hover:bg-sky-500 text-white"
                         >
                           <span>{asm.isAttempted ? 'View Result' : 'Start Assessment'}</span>
                           <ArrowRight className="w-3.5 h-3.5" />
@@ -494,7 +537,11 @@ export default function AssessmentsClient() {
                       {activeExam.moduleId ? 'MODULE ASSESSMENT' : 'COURSE POST-TEST'}
                     </span>
                     <span className="font-mono text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 font-bold border border-amber-500/30">
-                      1 Attempt Only
+                      {activeExam.isPassed
+                        ? 'Passed'
+                        : activeExam.isAttempted
+                        ? `Reattempt (${activeExam.attemptsUsed || 1} prior attempt${(activeExam.attemptsUsed || 1) > 1 ? 's' : ''})`
+                        : 'Passing Required'}
                     </span>
                     <span className="text-xs font-mono text-slate-500 dark:text-slate-400">
                       Questions: <strong>{totalQuestionsCount}</strong>
@@ -607,7 +654,11 @@ export default function AssessmentsClient() {
 
                       <div>
                         <span className="font-mono text-xs uppercase font-bold text-slate-400">
-                          {submissionResult.alreadyAttempted ? 'Recorded Official Evaluation (1 of 1 used)' : 'Assessment Evaluated & Recorded'}
+                          {submissionResult.alreadyAttempted
+                            ? `Recorded Evaluation (${activeExam.attemptsUsed || 1} attempt${(activeExam.attemptsUsed || 1) > 1 ? 's' : ''})`
+                            : submissionResult.attemptNumber && submissionResult.attemptNumber > 1
+                            ? `Reattempt #${submissionResult.attemptNumber} Evaluated & Recorded`
+                            : 'Assessment Evaluated & Recorded'}
                         </span>
                         <h3 className="text-2xl font-extrabold text-slate-900 dark:text-[#F8FAFC] font-heading mt-0.5">
                           {submissionResult.passed ? 'Competency Standard Satisfied!' : 'Below Passing Score'}
@@ -650,14 +701,40 @@ export default function AssessmentsClient() {
                         </div>
                       </div>
 
-                      {submissionResult.isPostTest && (
-                        <div className="max-w-md mx-auto p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-start gap-2.5 text-left">
-                          <ClipboardCheck className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
+                      {submissionResult.isPostTest && submissionResult.passed && (
+                        activeExam.requiresPractical === false || submissionResult.requiresPractical === false ? (
+                          <div className="max-w-md mx-auto p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-start gap-2.5 text-left">
+                            <Award className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
+                            <div className="text-[11px] text-slate-700 dark:text-slate-200">
+                              <strong className="text-emerald-700 dark:text-emerald-400 block font-heading mb-0.5">
+                                Full Modular Requirements Completed
+                              </strong>
+                              {submissionResult.certificateIssued
+                                ? 'Congratulations! Your grades have been finalized and your official STCW Certificate has been issued.'
+                                : 'Your course post-test passed. Visit Certificates to claim or download your official completion certificate.'}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="max-w-md mx-auto p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-start gap-2.5 text-left">
+                            <ClipboardCheck className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
+                            <div className="text-[11px] text-slate-700 dark:text-slate-200">
+                              <strong className="text-emerald-700 dark:text-emerald-400 block font-heading mb-0.5">
+                                Practical Attendance Cleared
+                              </strong>
+                              Your theoretical completion has been recorded in your instructor&apos;s practical training attendance roster.
+                            </div>
+                          </div>
+                        )
+                      )}
+
+                      {!submissionResult.passed && (
+                        <div className="max-w-md mx-auto p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-start gap-2.5 text-left">
+                          <RotateCcw className="w-4 h-4 text-amber-500 mt-0.5 shrink-0" />
                           <div className="text-[11px] text-slate-700 dark:text-slate-200">
-                            <strong className="text-emerald-700 dark:text-emerald-400 block font-heading mb-0.5">
-                              Practical Attendance Cleared
+                            <strong className="text-amber-700 dark:text-amber-400 block font-heading mb-0.5">
+                              Reattempt Available
                             </strong>
-                            Your theoretical completion has been recorded in your instructor&apos;s simulator training attendance roster.
+                            Review the questions below, then click <strong>Reattempt Assessment</strong> to retake this exam and reach the passing score ({submissionResult.passingScore ?? activeExam.passingScore}%).
                           </div>
                         </div>
                       )}
@@ -947,6 +1024,15 @@ export default function AssessmentsClient() {
                         <Award className="w-3.5 h-3.5" />
                         <span>View Recorded Grades</span>
                       </Link>
+                      {!submissionResult.passed && (
+                        <button
+                          onClick={handleStartRetake}
+                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-md cursor-pointer"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                          <span>Reattempt Assessment</span>
+                        </button>
+                      )}
                       <Link
                         href={`/learning?courseId=${activeExam.courseId}`}
                         className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-slate-200/80 dark:border-slate-800 text-sky-600 dark:text-sky-400 font-bold text-xs hover:bg-sky-500/10 transition-colors"
@@ -954,14 +1040,24 @@ export default function AssessmentsClient() {
                         <BookOpen className="w-3.5 h-3.5" />
                         <span>Continue to Learning</span>
                       </Link>
-                      {submissionResult.isPostTest && (
-                        <Link
-                          href="/schedules"
-                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs shadow-md"
-                        >
-                          <Calendar className="w-3.5 h-3.5" />
-                          <span>View Practical Drills</span>
-                        </Link>
+                      {submissionResult.isPostTest && submissionResult.passed && (
+                        activeExam.requiresPractical === false || submissionResult.requiresPractical === false ? (
+                          <Link
+                            href="/certificates"
+                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md"
+                          >
+                            <Award className="w-3.5 h-3.5" />
+                            <span>View Certificate</span>
+                          </Link>
+                        ) : (
+                          <Link
+                            href="/schedules"
+                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs shadow-md"
+                          >
+                            <Calendar className="w-3.5 h-3.5" />
+                            <span>View Training Schedule</span>
+                          </Link>
+                        )
                       )}
                     </div>
                   </>
@@ -998,7 +1094,7 @@ export default function AssessmentsClient() {
                           className="inline-flex items-center gap-1.5 px-5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-md disabled:opacity-50 cursor-pointer animate-pulse"
                         >
                           <GraduationCap className="w-3.5 h-3.5" />
-                          <span>{submitting ? 'Submitting & Grading...' : 'Confirm — Record My 1 Attempt'}</span>
+                          <span>{submitting ? 'Submitting & Grading...' : 'Confirm — Submit Assessment'}</span>
                         </button>
                       ) : (
                         <button

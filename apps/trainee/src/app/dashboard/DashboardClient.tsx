@@ -688,7 +688,7 @@ export default function TraineeDashboardClient() {
                       >
                         <div className="flex items-center justify-between text-xs font-mono">
                           <span className={`font-bold ${isDaily ? 'text-sky-600 dark:text-sky-400' : 'text-amber-500'}`}>
-                            {isDaily ? `${s.sessionCode || 'DAILY'} • ${s.formattedDate || s.date}` : `PRACTICAL • ${s.formattedDate || s.date}`}
+                            {isDaily ? `${s.sessionCode || 'MODULE'} • ${s.formattedDate || s.date}` : `PRACTICAL • ${s.formattedDate || s.date}`}
                           </span>
                           <span className="text-[10px] text-slate-500 font-semibold">
                             {s.isSetTime ? s.time : (s.isDueToday ? '🔔 Due Today' : (s.isCompleted ? '✓ Completed' : 'Online'))}

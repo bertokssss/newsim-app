@@ -104,7 +104,7 @@ export default function SchedulesClient() {
   const [formData, setFormData] = useState({
     courseId: '',
     instructorId: '',
-    room: 'Bridge Simulator Alpha',
+    room: 'Training Hall A',
     date: new Date().toISOString().split('T')[0],
     startTime: '08:00 AM',
     endTime: '12:00 PM',
@@ -271,7 +271,7 @@ export default function SchedulesClient() {
         setTimeout(() => setSuccessNotification(null), 6000);
         setFormData((prev) => ({
           ...prev,
-          room: 'Bridge Simulator Alpha',
+          room: 'Training Hall A',
           date: new Date().toISOString().split('T')[0],
           startTime: '08:00 AM',
           endTime: '12:00 PM',
@@ -371,7 +371,7 @@ export default function SchedulesClient() {
       counts[r] = (counts[r] || 0) + 1;
     });
     return Object.entries(counts).map(([name, count]) => ({
-      name: name.replace('Simulator', 'Sim.').replace('Bridge', 'Brdg.'),
+      name: name.replace('Simulator', 'Sim.'),
       fullName: name,
       count,
     }));
@@ -485,7 +485,7 @@ export default function SchedulesClient() {
                 Simulation Suite & Classroom Allocation Telemetry
               </h3>
               <p className="text-[11px] text-slate-500 dark:text-slate-400 font-sans">
-                Active suite scheduling across bridge, engine room, and ECDIS maritime simulator facilities.
+                Active suite and classroom scheduling across NEWSIM training facilities.
               </p>
             </div>
           </div>
@@ -1036,7 +1036,7 @@ export default function SchedulesClient() {
                         required
                         value={formData.room}
                         onChange={(e) => setFormData({ ...formData, room: e.target.value })}
-                        placeholder="e.g. Bridge Simulator Alpha"
+                        placeholder="e.g. Training Hall A"
                         className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-[#F8FAFC] outline-none font-mono"
                       />
                     )}

@@ -2186,7 +2186,7 @@ export async function getInstructorSchedulesList(profileId?: string) {
       instructorAvatarUrl: instructorProfile?.avatar_url || null,
       isSubstitute,
       substituteInstructorId: s.substitute_instructor_id || null,
-      room: s.room || 'Bridge Simulator Alpha',
+      room: s.room || 'Training Hall A',
       centerName: s.training_centers?.name || 'NEWSIM Talisay Training Center',
       date: dateFormatted,
       startDate: dateFormatted,
