@@ -199,6 +199,22 @@ export default function GradesClient() {
     }
   };
 
+  const selectedCourseObj = courses.find((c: any) => c.id === courseId) || null;
+  const isSelectedCourseFullModular = Boolean(
+    selectedCourseObj &&
+      (selectedCourseObj.deliveryMode === 'FULL_MODULAR' ||
+        selectedCourseObj.requiresPractical === false ||
+        Number(selectedCourseObj.practicalDays ?? 1) === 0 ||
+        String(selectedCourseObj.category || '').toLowerCase().includes('in-house'))
+  );
+
+  useEffect(() => {
+    if (isSelectedCourseFullModular) {
+      setViewFilter('ALL');
+      setChartMetric('MODULAR');
+    }
+  }, [isSelectedCourseFullModular, courseId]);
+
   const filtered = gradebook.filter(
     (t) =>
       t.traineeName.toLowerCase().includes(search.toLowerCase()) ||
@@ -237,10 +253,14 @@ export default function GradesClient() {
             </span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-[#F8FAFC] tracking-tight font-heading">
-            Modular Theory & Practical Simulator Gradebook
+            {isSelectedCourseFullModular
+              ? 'Full Modular Quizzes & Academic Record Review'
+              : 'Modular Theory & Practical Simulator Gradebook'}
           </h1>
           <p className="text-sm text-slate-600 dark:text-[#CBD5E1] leading-relaxed font-sans">
-            Validate theoretical modular quizzes and practical simulator drill evaluations separately. All recorded scores sync to the trainee records and trigger audited change logs.
+            {isSelectedCourseFullModular
+              ? 'Review modular quizzes, post-assessment scores, and validate final academic records for Full Modular / In-House courses (no practical evaluation required).'
+              : 'Validate theoretical modular quizzes and practical simulator drill evaluations separately. All recorded scores sync to the trainee records and trigger audited change logs.'}
           </p>
         </div>
       </motion.div>
@@ -251,13 +271,15 @@ export default function GradesClient() {
         initial="hidden"
         whileInView="visible"
         viewport={{ once: true, amount: 0.15 }}
-        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"
+        className={`grid grid-cols-1 gap-4 ${
+          isSelectedCourseFullModular ? 'sm:grid-cols-3' : 'sm:grid-cols-2 lg:grid-cols-4'
+        }`}
       >
         {/* Modular Theory Class Average */}
         <motion.div variants={cascadeItem} className="p-4 rounded-2xl bg-white dark:bg-[#0c1a2c] border border-blue-200/60 dark:border-blue-900/50 shadow-sm relative overflow-hidden">
           <div className="flex items-center justify-between mb-2">
             <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold uppercase tracking-wider bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/20">
-              Modular Theory
+              Modular Quizzes
             </span>
             <div className="w-8 h-8 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center">
               <BookOpen className="w-4 h-4" />
@@ -267,33 +289,35 @@ export default function GradesClient() {
             {summary.classModularAverage ? `${summary.classModularAverage}%` : '--'}
           </div>
           <div className="text-[11px] font-mono text-slate-500 dark:text-[#CBD5E1] mt-1">
-            Benchmark: 75% • {summary.totalModularAssessments ?? modularAssessments.length} Tests
+            Benchmark: 75% • {summary.totalModularAssessments ?? modularAssessments.length} Quizzes
           </div>
         </motion.div>
 
-        {/* Practical Simulator Class Average */}
-        <motion.div variants={cascadeItem} className="p-4 rounded-2xl bg-white dark:bg-[#0c1a2c] border border-emerald-200/60 dark:border-emerald-900/50 shadow-sm relative overflow-hidden">
-          <div className="flex items-center justify-between mb-2">
-            <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20">
-              Practical Simulator
-            </span>
-            <div className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
-              <Compass className="w-4 h-4" />
+        {/* Practical Simulator Class Average (Only for Modular + Practical courses) */}
+        {!isSelectedCourseFullModular && (
+          <motion.div variants={cascadeItem} className="p-4 rounded-2xl bg-white dark:bg-[#0c1a2c] border border-emerald-200/60 dark:border-emerald-900/50 shadow-sm relative overflow-hidden">
+            <div className="flex items-center justify-between mb-2">
+              <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20">
+                Practical Simulator
+              </span>
+              <div className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+                <Compass className="w-4 h-4" />
+              </div>
             </div>
-          </div>
-          <div className="text-2xl font-extrabold text-slate-900 dark:text-[#F8FAFC] font-heading">
-            {summary.classPracticalAverage ? `${summary.classPracticalAverage}%` : '--'}
-          </div>
-          <div className="text-[11px] font-mono text-slate-500 dark:text-[#CBD5E1] mt-1">
-            Benchmark: 75% • {summary.totalPracticalAssessments ?? practicalAssessments.length} Drills
-          </div>
-        </motion.div>
+            <div className="text-2xl font-extrabold text-slate-900 dark:text-[#F8FAFC] font-heading">
+              {summary.classPracticalAverage ? `${summary.classPracticalAverage}%` : '--'}
+            </div>
+            <div className="text-[11px] font-mono text-slate-500 dark:text-[#CBD5E1] mt-1">
+              Benchmark: 75% • {summary.totalPracticalAssessments ?? practicalAssessments.length} Drills
+            </div>
+          </motion.div>
+        )}
 
         {/* STCW Qualification Status */}
         <motion.div variants={cascadeItem} className="p-4 rounded-2xl bg-white dark:bg-[#0c1a2c] border border-violet-200/60 dark:border-violet-900/50 shadow-sm relative overflow-hidden">
           <div className="flex items-center justify-between mb-2">
             <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold uppercase tracking-wider bg-violet-500/10 text-violet-700 dark:text-violet-300 border border-violet-500/20">
-              STCW Qualification
+              {isSelectedCourseFullModular ? 'Record Qualification' : 'STCW Qualification'}
             </span>
             <div className="w-8 h-8 rounded-xl bg-violet-500/10 text-violet-600 dark:text-violet-400 flex items-center justify-center">
               <Award className="w-4 h-4" />
@@ -303,7 +327,8 @@ export default function GradesClient() {
             {summary.qualifiedCount ?? 0} / {summary.totalTrainees ?? gradebook.length}
           </div>
           <div className="text-[11px] font-mono text-slate-500 dark:text-[#CBD5E1] mt-1">
-            {summary.totalTrainees > 0 ? Math.round(((summary.qualifiedCount || 0) / summary.totalTrainees) * 100) : 0}% Dual-Competency Qualified
+            {summary.totalTrainees > 0 ? Math.round(((summary.qualifiedCount || 0) / summary.totalTrainees) * 100) : 0}%{' '}
+            {isSelectedCourseFullModular ? 'Full Modular Qualified' : 'Dual-Competency Qualified'}
           </div>
         </motion.div>
 
@@ -318,10 +343,12 @@ export default function GradesClient() {
             </div>
           </div>
           <div className="text-2xl font-extrabold text-slate-900 dark:text-[#F8FAFC] font-heading">
-            {assessments.length} Tests
+            {assessments.length} {isSelectedCourseFullModular ? 'Quizzes' : 'Tests'}
           </div>
           <div className="text-[11px] font-mono text-slate-500 dark:text-[#CBD5E1] mt-1">
-            {modularAssessments.length} Modular • {practicalAssessments.length} Practical
+            {isSelectedCourseFullModular
+              ? '100% Modular • No Practical Drills'
+              : `${modularAssessments.length} Modular • ${practicalAssessments.length} Practical`}
           </div>
         </motion.div>
       </motion.div>
@@ -341,7 +368,9 @@ export default function GradesClient() {
               <GraduationCap className="w-5 h-5 text-sky-500" />
               <div>
                 <h3 className="font-extrabold text-sm sm:text-base text-slate-900 dark:text-[#F8FAFC] font-heading">
-                  STCW Modular Theory vs Practical Simulator Performance
+                  {isSelectedCourseFullModular
+                    ? 'Full Modular Quiz Performance Overview'
+                    : 'STCW Modular Theory vs Practical Simulator Performance'}
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 font-mono">
                   Comparative analysis across cohort seafarers against the 75% benchmark
@@ -349,38 +378,40 @@ export default function GradesClient() {
               </div>
             </div>
 
-            <div className="flex items-center gap-1.5 p-1 rounded-xl bg-slate-100 dark:bg-slate-800 text-[11px] font-mono font-bold self-start sm:self-auto">
-              <button
-                onClick={() => setChartMetric('ALL')}
-                className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${
-                  chartMetric === 'ALL'
-                    ? 'bg-white dark:bg-[#0c1a2c] text-sky-600 dark:text-sky-400 shadow-xs'
-                    : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-                }`}
-              >
-                All Metrics
-              </button>
-              <button
-                onClick={() => setChartMetric('MODULAR')}
-                className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${
-                  chartMetric === 'MODULAR'
-                    ? 'bg-white dark:bg-[#0c1a2c] text-blue-600 dark:text-blue-400 shadow-xs'
-                    : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-                }`}
-              >
-                Modular Only
-              </button>
-              <button
-                onClick={() => setChartMetric('PRACTICAL')}
-                className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${
-                  chartMetric === 'PRACTICAL'
-                    ? 'bg-white dark:bg-[#0c1a2c] text-emerald-600 dark:text-emerald-400 shadow-xs'
-                    : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-                }`}
-              >
-                Practical Only
-              </button>
-            </div>
+            {!isSelectedCourseFullModular && (
+              <div className="flex items-center gap-1.5 p-1 rounded-xl bg-slate-100 dark:bg-slate-800 text-[11px] font-mono font-bold self-start sm:self-auto">
+                <button
+                  onClick={() => setChartMetric('ALL')}
+                  className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${
+                    chartMetric === 'ALL'
+                      ? 'bg-white dark:bg-[#0c1a2c] text-sky-600 dark:text-sky-400 shadow-xs'
+                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                  }`}
+                >
+                  All Metrics
+                </button>
+                <button
+                  onClick={() => setChartMetric('MODULAR')}
+                  className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${
+                    chartMetric === 'MODULAR'
+                      ? 'bg-white dark:bg-[#0c1a2c] text-blue-600 dark:text-blue-400 shadow-xs'
+                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                  }`}
+                >
+                  Modular Only
+                </button>
+                <button
+                  onClick={() => setChartMetric('PRACTICAL')}
+                  className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${
+                    chartMetric === 'PRACTICAL'
+                      ? 'bg-white dark:bg-[#0c1a2c] text-emerald-600 dark:text-emerald-400 shadow-xs'
+                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                  }`}
+                >
+                  Practical Only
+                </button>
+              </div>
+            )}
           </div>
 
           <AnimatePresence mode="wait">
@@ -411,13 +442,15 @@ export default function GradesClient() {
                           <div className="p-2.5 rounded-xl bg-slate-900/95 text-white border border-slate-700 shadow-xl text-xs space-y-1 font-mono">
                             <div className="font-bold text-sky-400">{item.fullName}</div>
                             <div className="flex justify-between gap-4 text-blue-300">
-                              <span>Modular Theory:</span>
+                              <span>Modular Quizzes:</span>
                               <span className="font-bold">{item.modular}%</span>
                             </div>
-                            <div className="flex justify-between gap-4 text-emerald-300">
-                              <span>Practical Simulator:</span>
-                              <span className="font-bold">{item.practical}%</span>
-                            </div>
+                            {!isSelectedCourseFullModular && (
+                              <div className="flex justify-between gap-4 text-emerald-300">
+                                <span>Practical Simulator:</span>
+                                <span className="font-bold">{item.practical}%</span>
+                              </div>
+                            )}
                             <div className="flex justify-between gap-4 text-amber-300 pt-1 border-t border-slate-800">
                               <span>Final Grade:</span>
                               <span className="font-bold">{item.final}%</span>
@@ -429,10 +462,10 @@ export default function GradesClient() {
                     }}
                   />
                   <ReferenceLine y={75} stroke="#f59e0b" strokeDasharray="4 4" label={{ value: '75% Pass Benchmark', fill: '#f59e0b', fontSize: 9, position: 'insideTopRight' }} />
-                  {(chartMetric === 'ALL' || chartMetric === 'MODULAR') && (
-                    <Bar dataKey="modular" name="Modular Theory" fill="#3b82f6" radius={[4, 4, 0, 0]} isAnimationActive={true} animationDuration={1800} animationEasing="ease-out" />
+                  {(isSelectedCourseFullModular || chartMetric === 'ALL' || chartMetric === 'MODULAR') && (
+                    <Bar dataKey="modular" name="Modular Quizzes" fill="#3b82f6" radius={[4, 4, 0, 0]} isAnimationActive={true} animationDuration={1800} animationEasing="ease-out" />
                   )}
-                  {(chartMetric === 'ALL' || chartMetric === 'PRACTICAL') && (
+                  {!isSelectedCourseFullModular && (chartMetric === 'ALL' || chartMetric === 'PRACTICAL') && (
                     <Bar dataKey="practical" name="Practical Simulator" fill="#10b981" radius={[4, 4, 0, 0]} isAnimationActive={true} animationBegin={100} animationDuration={1800} animationEasing="ease-out" />
                   )}
                 </BarChart>
@@ -473,28 +506,32 @@ export default function GradesClient() {
                   : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
               }`}
             >
-              All Assessments ({assessments.length})
+              {isSelectedCourseFullModular ? `All Quizzes (${assessments.length})` : `All Assessments (${assessments.length})`}
             </button>
-            <button
-              onClick={() => setViewFilter('MODULAR')}
-              className={`px-3 py-1 rounded-lg text-xs font-mono font-bold transition-all ${
-                viewFilter === 'MODULAR'
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
-              }`}
-            >
-              Modular Theory Only ({modularAssessments.length})
-            </button>
-            <button
-              onClick={() => setViewFilter('PRACTICAL')}
-              className={`px-3 py-1 rounded-lg text-xs font-mono font-bold transition-all ${
-                viewFilter === 'PRACTICAL'
-                  ? 'bg-emerald-600 text-white shadow-sm'
-                  : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
-              }`}
-            >
-              Practical Simulator Only ({practicalAssessments.length})
-            </button>
+            {!isSelectedCourseFullModular && (
+              <>
+                <button
+                  onClick={() => setViewFilter('MODULAR')}
+                  className={`px-3 py-1 rounded-lg text-xs font-mono font-bold transition-all ${
+                    viewFilter === 'MODULAR'
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
+                  }`}
+                >
+                  Modular Theory Only ({modularAssessments.length})
+                </button>
+                <button
+                  onClick={() => setViewFilter('PRACTICAL')}
+                  className={`px-3 py-1 rounded-lg text-xs font-mono font-bold transition-all ${
+                    viewFilter === 'PRACTICAL'
+                      ? 'bg-emerald-600 text-white shadow-sm'
+                      : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
+                  }`}
+                >
+                  Practical Simulator Only ({practicalAssessments.length})
+                </button>
+              </>
+            )}
           </div>
         </div>
 

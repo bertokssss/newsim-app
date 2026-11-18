@@ -55,6 +55,15 @@ const cascadeItem = {
   },
 };
 
+interface QuizBreakdownDetail {
+  assessmentId: string;
+  title: string;
+  score: number;
+  passed: boolean;
+  attemptNumber: number;
+  passingScoreRequired: number;
+}
+
 interface CourseBreakdownComponent {
   score: number;
   weight: number;
@@ -67,12 +76,16 @@ interface CourseBreakdownComponent {
   late?: number;
   completedCount?: number;
   totalCount?: number;
+  quizDetails?: QuizBreakdownDetail[];
 }
 
 interface CourseBreakdown {
   courseId: string;
   courseTitle: string;
   courseCode: string;
+  isFullModular?: boolean;
+  requiresPractical?: boolean;
+  deliveryMode?: 'FULL_MODULAR' | 'MODULAR_AND_PRACTICAL';
   overallGrade: number;
   status: 'PASSED' | 'FAILED' | 'IN_PROGRESS' | 'NEEDS_REMEDIATION' | 'PENDING_GRADING';
   policyName: string;
@@ -88,8 +101,8 @@ interface CourseBreakdown {
     moduleQuiz: number;
   };
   components: {
-    attendance: CourseBreakdownComponent;
-    practical: CourseBreakdownComponent;
+    attendance?: CourseBreakdownComponent;
+    practical?: CourseBreakdownComponent;
     moduleQuiz: CourseBreakdownComponent;
   };
 }
@@ -131,8 +144,9 @@ export default function GradesClient() {
   const [practicalFeedbacks, setPracticalFeedbacks] = useState<PracticalFeedback[]>([]);
   const [summary, setSummary] = useState<any>({});
   const [loading, setLoading] = useState(true);
-  const [filterMode, setFilterMode] = useState<'ALL' | 'MODULAR' | 'PRACTICAL'>('ALL');
-  const [chartMetric, setChartMetric] = useState<'CONTRIBUTION' | 'RAW_SCORE'>('CONTRIBUTION');
+  const [filterMode, setFilterMode] = useState<'ALL' | 'MODULAR' | 'PRACTICAL' | 'PRE_TEST' | 'POST_TEST'>('ALL');
+  const [selectedCourseId, setSelectedCourseId] = useState<string>('');
+  const [chartMetric, setChartMetric] = useState<'CONTRIBUTION' | 'RAW_SCORE'>('RAW_SCORE');
   const [chartInView, setChartInView] = useState(false);
   const [expandedEvaluations, setExpandedEvaluations] = useState<Record<string, boolean>>({});
 
@@ -141,10 +155,19 @@ export default function GradesClient() {
       .then((res) => res.json())
       .then((json) => {
         if (json.success) {
+          const breakdowns: CourseBreakdown[] = json.courseBreakdowns || [];
           setGrades(json.data || []);
-          setCourseBreakdowns(json.courseBreakdowns || []);
+          setCourseBreakdowns(breakdowns);
           setPracticalFeedbacks(json.practicalFeedbacks || []);
           setSummary(json.summary || {});
+          if (breakdowns.length > 0) {
+            setSelectedCourseId((prev) => prev || breakdowns[0].courseId);
+            const primaryIsFullMod =
+              breakdowns[0].isFullModular || breakdowns[0].requiresPractical === false;
+            if (!primaryIsFullMod) {
+              setChartMetric('CONTRIBUTION');
+            }
+          }
         }
       })
       .catch((err) => console.error('Failed to load trainee grades:', err))
@@ -161,11 +184,34 @@ export default function GradesClient() {
   const modularList = grades.filter((g) => g.category === 'MODULAR');
   const practicalList = grades.filter((g) => g.category === 'PRACTICAL');
 
+  const hasPracticalCourses =
+    typeof summary.hasPracticalCourses === 'boolean'
+      ? summary.hasPracticalCourses
+      : courseBreakdowns.length > 0
+      ? courseBreakdowns.some(
+          (cb) =>
+            cb.requiresPractical !== false &&
+            !cb.isFullModular &&
+            cb.deliveryMode !== 'FULL_MODULAR'
+        )
+      : practicalList.length > 0 || practicalFeedbacks.length > 0;
+
+  const allFullModular = courseBreakdowns.length > 0 && !hasPracticalCourses;
+
+  const preTestList = modularList.filter((g) => g.assessmentCode !== 'MOD-POST');
+  const postTestList = modularList.filter((g) => g.assessmentCode === 'MOD-POST');
+
   const filteredGrades =
     filterMode === 'ALL'
-      ? grades
+      ? allFullModular
+        ? modularList
+        : grades
       : filterMode === 'MODULAR'
       ? modularList
+      : filterMode === 'PRE_TEST'
+      ? preTestList
+      : filterMode === 'POST_TEST'
+      ? postTestList
       : practicalList;
 
   const getStatusBadge = (status: string, result?: string, score?: number) => {
@@ -219,8 +265,9 @@ export default function GradesClient() {
             Official Course Grades & Competency Transcript
           </h1>
           <p className="text-xs sm:text-sm text-slate-600 dark:text-[#CBD5E1] font-sans leading-relaxed">
-            Monitor verified academic performance across theoretical knowledge quizzes, practical simulator maneuvering evaluations, and contact-hour attendance.
-            Final grades reflect approved institutional weighting formulas where unattempted assessments are never arbitrarily calculated as zero.
+            {allFullModular
+              ? 'Monitor verified academic performance across your modular competency quizzes and comprehensive final modular assessments. Full Modular courses are graded 100% from modular quizzes with no practical training or physical attendance required.'
+              : 'Monitor verified academic performance across theoretical knowledge quizzes, practical simulator maneuvering evaluations, and contact-hour attendance. Final grades reflect approved institutional weighting formulas where unattempted assessments are never arbitrarily calculated as zero.'}
           </p>
         </div>
       </motion.div>
@@ -231,9 +278,11 @@ export default function GradesClient() {
         initial="hidden"
         whileInView="visible"
         viewport={{ once: true, amount: 0.2 }}
-        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"
+        className={`grid grid-cols-1 gap-4 ${
+          allFullModular ? 'sm:grid-cols-3' : 'sm:grid-cols-2 lg:grid-cols-4'
+        }`}
       >
-        {/* Modular Theory Average */}
+        {/* Modular Quizzes Average */}
         <motion.div
           variants={cascadeItem}
           whileHover={{ y: -2, transition: { duration: 0.2, ease: easeOutCurve } }}
@@ -241,7 +290,7 @@ export default function GradesClient() {
         >
           <div className="flex items-center justify-between mb-2">
             <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold uppercase tracking-wider bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/20">
-              Modular Theory
+              {allFullModular ? 'Modular Quizzes' : 'Modular Theory'}
             </span>
             <div className="w-8 h-8 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center">
               <BookOpen className="w-4 h-4" />
@@ -251,57 +300,83 @@ export default function GradesClient() {
             {summary.modularAverage ? `${summary.modularAverage}%` : '--'}
           </div>
           <div className="text-[11px] font-mono text-slate-500 dark:text-[#CBD5E1] mt-1">
-            {summary.modularPassedCount ?? 0} / {summary.modularTotal ?? modularList.length} Passed (Pass: 75%)
+            {summary.modularPassedCount ?? 0} / {summary.modularTotal ?? modularList.length} Passed (Min: 75% per Quiz)
           </div>
         </motion.div>
 
-        {/* Practical Simulator Average */}
-        <motion.div
-          variants={cascadeItem}
-          whileHover={{ y: -2, transition: { duration: 0.2, ease: easeOutCurve } }}
-          className="p-4 rounded-2xl bg-white dark:bg-[#0c1a2c] border border-emerald-200/70 dark:border-emerald-900/50 shadow-sm relative overflow-hidden"
-        >
-          <div className="flex items-center justify-between mb-2">
-            <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20">
-              Practical Simulator
-            </span>
-            <div className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
-              <Compass className="w-4 h-4" />
+        {/* Practical Simulator Average (Only for Modular + Practical courses) */}
+        {!allFullModular && (
+          <motion.div
+            variants={cascadeItem}
+            whileHover={{ y: -2, transition: { duration: 0.2, ease: easeOutCurve } }}
+            className="p-4 rounded-2xl bg-white dark:bg-[#0c1a2c] border border-emerald-200/70 dark:border-emerald-900/50 shadow-sm relative overflow-hidden"
+          >
+            <div className="flex items-center justify-between mb-2">
+              <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20">
+                Practical Simulator
+              </span>
+              <div className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+                <Compass className="w-4 h-4" />
+              </div>
             </div>
-          </div>
-          <div className="text-2xl font-extrabold text-slate-900 dark:text-[#F8FAFC] font-heading">
-            {summary.practicalAverage ? `${summary.practicalAverage}%` : '--'}
-          </div>
-          <div className="text-[11px] font-mono text-slate-500 dark:text-[#CBD5E1] mt-1">
-            {summary.practicalPassedCount ?? 0} / {summary.practicalTotal ?? practicalList.length} Passed (Pass: 75%)
-          </div>
-        </motion.div>
-
-        {/* Attendance Weight Contribution */}
-        <motion.div
-          variants={cascadeItem}
-          whileHover={{ y: -2, transition: { duration: 0.2, ease: easeOutCurve } }}
-          className="p-4 rounded-2xl bg-white dark:bg-[#0c1a2c] border border-purple-200/70 dark:border-purple-900/50 shadow-sm relative overflow-hidden"
-        >
-          <div className="flex items-center justify-between mb-2">
-            <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold uppercase tracking-wider bg-purple-500/10 text-purple-700 dark:text-purple-300 border border-purple-500/20">
-              Contact Attendance
-            </span>
-            <div className="w-8 h-8 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center">
-              <CalendarCheck2 className="w-4 h-4" />
+            <div className="text-2xl font-extrabold text-slate-900 dark:text-[#F8FAFC] font-heading">
+              {summary.practicalAverage ? `${summary.practicalAverage}%` : '--'}
             </div>
-          </div>
-          <div className="text-2xl font-extrabold text-slate-900 dark:text-[#F8FAFC] font-heading">
-            {courseBreakdowns.length > 0 && courseBreakdowns[0].components?.attendance
-              ? `${courseBreakdowns[0].components.attendance.score}%`
-              : 'Active'}
-          </div>
-          <div className="text-[11px] font-mono text-slate-500 dark:text-[#CBD5E1] mt-1">
-            Min. 80% Required for Certification
-          </div>
-        </motion.div>
+            <div className="text-[11px] font-mono text-slate-500 dark:text-[#CBD5E1] mt-1">
+              {summary.practicalPassedCount ?? 0} / {summary.practicalTotal ?? practicalList.length} Passed (Pass: 75%)
+            </div>
+          </motion.div>
+        )}
 
-        {/* Dual Competency Qualification Status */}
+        {/* Attendance Weight Contribution OR Quizzes Scope Card for Full Modular */}
+        {!allFullModular ? (
+          <motion.div
+            variants={cascadeItem}
+            whileHover={{ y: -2, transition: { duration: 0.2, ease: easeOutCurve } }}
+            className="p-4 rounded-2xl bg-white dark:bg-[#0c1a2c] border border-purple-200/70 dark:border-purple-900/50 shadow-sm relative overflow-hidden"
+          >
+            <div className="flex items-center justify-between mb-2">
+              <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold uppercase tracking-wider bg-purple-500/10 text-purple-700 dark:text-purple-300 border border-purple-500/20">
+                Contact Attendance
+              </span>
+              <div className="w-8 h-8 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center">
+                <CalendarCheck2 className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="text-2xl font-extrabold text-slate-900 dark:text-[#F8FAFC] font-heading">
+              {(() => {
+                const pracCourse = courseBreakdowns.find((c) => !c.isFullModular && c.components?.attendance);
+                return pracCourse?.components?.attendance ? `${pracCourse.components.attendance.score}%` : 'Active';
+              })()}
+            </div>
+            <div className="text-[11px] font-mono text-slate-500 dark:text-[#CBD5E1] mt-1">
+              Min. 80% Required for Certification
+            </div>
+          </motion.div>
+        ) : (
+          <motion.div
+            variants={cascadeItem}
+            whileHover={{ y: -2, transition: { duration: 0.2, ease: easeOutCurve } }}
+            className="p-4 rounded-2xl bg-white dark:bg-[#0c1a2c] border border-indigo-200/70 dark:border-indigo-900/50 shadow-sm relative overflow-hidden"
+          >
+            <div className="flex items-center justify-between mb-2">
+              <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold uppercase tracking-wider bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 border border-indigo-500/20">
+                Grading Mode
+              </span>
+              <div className="w-8 h-8 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
+                <FileCheck className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="text-xl font-extrabold text-slate-900 dark:text-[#F8FAFC] font-heading">
+              100% Quizzes
+            </div>
+            <div className="text-[11px] font-mono text-slate-500 dark:text-[#CBD5E1] mt-1">
+              Full Modular • No Practical or Attendance
+            </div>
+          </motion.div>
+        )}
+
+        {/* Competency Qualification Status */}
         <motion.div
           variants={cascadeItem}
           whileHover={{ y: -2, transition: { duration: 0.2, ease: easeOutCurve } }}
@@ -316,48 +391,123 @@ export default function GradesClient() {
             </div>
           </div>
           <div className="text-xl font-extrabold text-sky-600 dark:text-sky-400 font-heading">
-            {summary.isModularQualified && summary.isPracticalQualified
+            {allFullModular
+              ? summary.isOverallQualified
+                ? 'QUALIFIED'
+                : courseBreakdowns.some((cb) => cb.status === 'NEEDS_REMEDIATION' || cb.status === 'FAILED')
+                ? 'RETAKE NEEDED'
+                : 'IN PROGRESS'
+              : summary.isModularQualified && summary.isPracticalQualified
               ? 'QUALIFIED'
               : 'IN PROGRESS'}
           </div>
           <div className="text-[11px] font-mono text-slate-500 dark:text-[#CBD5E1] mt-1">
-            Dual Theory & Simulator Standards
+            {allFullModular ? 'Full Modular Quiz Standards' : 'Dual Theory & Simulator Standards'}
           </div>
         </motion.div>
       </motion.div>
 
       {/* Interactive Grade Composition & Weighting Graph */}
       {(() => {
-        const primaryCourse = courseBreakdowns[0] || null;
-        const gradeGraphData = [
-          {
-            pillar: 'Attendance (10%)',
-            fullName: 'Attendance Quorum',
-            score: primaryCourse?.components?.attendance?.score ?? 100,
-            weight: 10,
-            contribution: primaryCourse?.components?.attendance?.weightedContribution ?? 10,
-            benchmark: 80,
-            color: '#a855f7',
-          },
-          {
-            pillar: 'Practical (60%)',
-            fullName: 'Simulator Performance Drills',
-            score: primaryCourse?.components?.practical?.score ?? (summary.practicalAverage || 0),
-            weight: 60,
-            contribution: primaryCourse?.components?.practical?.weightedContribution ?? (summary.practicalAverage ? (summary.practicalAverage * 0.6) : 0),
-            benchmark: 70,
-            color: '#10b981',
-          },
-          {
-            pillar: 'Theory (40%)',
-            fullName: 'Modular Knowledge Assessments',
-            score: primaryCourse?.components?.moduleQuiz?.score ?? (summary.modularAverage || 0),
-            weight: 40,
-            contribution: primaryCourse?.components?.moduleQuiz?.weightedContribution ?? (summary.modularAverage ? (summary.modularAverage * 0.4) : 0),
-            benchmark: 75,
-            color: '#0284c7',
-          },
-        ];
+        const primaryCourse =
+          courseBreakdowns.find((c) => c.courseId === selectedCourseId) || courseBreakdowns[0] || null;
+        const primaryWeights = primaryCourse?.weights || {
+          attendance: allFullModular ? 0 : 10,
+          practical: allFullModular ? 0 : 50,
+          moduleQuiz: allFullModular ? 100 : 40,
+        };
+        const isPrimaryFullModular = primaryCourse
+          ? Boolean(
+              primaryCourse.isFullModular ||
+                primaryCourse.requiresPractical === false ||
+                primaryCourse.deliveryMode === 'FULL_MODULAR' ||
+                (primaryWeights.attendance === 0 && primaryWeights.practical === 0)
+            )
+          : allFullModular;
+
+        const gradeGraphData: Array<{
+          pillar: string;
+          fullName: string;
+          score: number;
+          weight: number;
+          contribution: number;
+          benchmark: number;
+          color: string;
+        }> = [];
+
+        if (isPrimaryFullModular) {
+          const quizDetails = primaryCourse?.components?.moduleQuiz?.quizDetails || [];
+          const attemptedQuizzes = quizDetails.filter((q) => q.attemptNumber > 0);
+
+          if (attemptedQuizzes.length > 0) {
+            const perQuizWeight = Number((100 / quizDetails.length).toFixed(1));
+            attemptedQuizzes.forEach((q, idx) => {
+              const shortLabel = q.title.toLowerCase().includes('post')
+                ? 'Post-Test'
+                : `Module ${q.title.match(/Module\s*(\d+)/i)?.[1] || idx + 1}`;
+              gradeGraphData.push({
+                pillar: shortLabel,
+                fullName: q.title,
+                score: Number(q.score) || 0,
+                weight: perQuizWeight,
+                contribution: Number(((Number(q.score) || 0) / quizDetails.length).toFixed(2)),
+                benchmark: q.passingScoreRequired || 75,
+                color: q.passed ? '#0284c7' : '#f59e0b',
+              });
+            });
+          } else {
+            const modAvg = primaryCourse?.components?.moduleQuiz?.score ?? (summary.modularAverage || 0);
+            gradeGraphData.push({
+              pillar: 'Modular Quizzes (100%)',
+              fullName: 'Modular Theory Quizzes & Final Assessment',
+              score: modAvg,
+              weight: 100,
+              contribution: primaryCourse?.components?.moduleQuiz?.weightedContribution ?? modAvg,
+              benchmark: 70,
+              color: '#0284c7',
+            });
+          }
+        } else {
+          if (primaryWeights.attendance > 0 && primaryCourse?.components?.attendance) {
+            gradeGraphData.push({
+              pillar: `Attendance (${primaryWeights.attendance}%)`,
+              fullName: 'Attendance Quorum',
+              score: primaryCourse.components.attendance.score ?? 0,
+              weight: primaryWeights.attendance,
+              contribution: primaryCourse.components.attendance.weightedContribution ?? 0,
+              benchmark: primaryCourse.minAttendancePct || 80,
+              color: '#a855f7',
+            });
+          }
+          if (primaryWeights.practical > 0) {
+            gradeGraphData.push({
+              pillar: `Practical (${primaryWeights.practical}%)`,
+              fullName: 'Simulator Performance Drills',
+              score: primaryCourse?.components?.practical?.score ?? (summary.practicalAverage || 0),
+              weight: primaryWeights.practical,
+              contribution:
+                primaryCourse?.components?.practical?.weightedContribution ??
+                (summary.practicalAverage ? (summary.practicalAverage * primaryWeights.practical) / 100 : 0),
+              benchmark: 70,
+              color: '#10b981',
+            });
+          }
+          if (primaryWeights.moduleQuiz > 0) {
+            gradeGraphData.push({
+              pillar: `Theory (${primaryWeights.moduleQuiz}%)`,
+              fullName: 'Modular Knowledge Assessments',
+              score: primaryCourse?.components?.moduleQuiz?.score ?? (summary.modularAverage || 0),
+              weight: primaryWeights.moduleQuiz,
+              contribution:
+                primaryCourse?.components?.moduleQuiz?.weightedContribution ??
+                (summary.modularAverage ? (summary.modularAverage * primaryWeights.moduleQuiz) / 100 : 0),
+              benchmark: 75,
+              color: '#0284c7',
+            });
+          }
+        }
+
+        const chartMetricKey = chartMetric;
 
         return (
           <motion.div
@@ -368,47 +518,76 @@ export default function GradesClient() {
             transition={{ duration: 0.5, ease: easeOutCurve }}
             className="p-6 sm:p-7 rounded-3xl bg-white dark:bg-[#0c1a2c] border border-slate-200/80 dark:border-slate-800 shadow-sm relative overflow-hidden space-y-6"
           >
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
               <div>
                 <div className="flex items-center gap-2 mb-1">
                   <Award className="w-4 h-4 text-sky-500" />
                   <h3 className="font-extrabold text-base text-slate-900 dark:text-[#F8FAFC] font-heading">
-                    STCW 3-Pillar Weighting &amp; Performance Distribution
+                    {isPrimaryFullModular
+                      ? `Modular Quiz Performance Distribution${primaryCourse ? ` (${primaryCourse.courseCode})` : ''}`
+                      : `STCW Weighting & Performance Distribution${primaryCourse ? ` (${primaryCourse.courseCode})` : ''}`}
                   </h3>
                 </div>
                 <p className="text-xs text-slate-500 font-sans">
-                  Formula: Final Grade = (Attendance × 10%) + (Practical Simulator × 60%) + (Theory Quizzes × 40%)
+                  {isPrimaryFullModular
+                    ? 'Formula: Final Grade = Average of Modular Quizzes × 100% (No Practical or Attendance Required)'
+                    : `Formula: Final Grade = ${
+                        primaryWeights.attendance > 0 ? `(Attendance × ${primaryWeights.attendance}%) + ` : ''
+                      }(Practical Simulator × ${primaryWeights.practical}%) + (Theory Quizzes × ${primaryWeights.moduleQuiz}%)`}
                 </p>
               </div>
 
-              <div className="flex items-center gap-1.5 p-1 rounded-2xl bg-slate-100 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 self-start sm:self-auto">
-                <button
-                  onClick={() => setChartMetric('CONTRIBUTION')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition-all ${
-                    chartMetric === 'CONTRIBUTION'
-                      ? 'bg-white dark:bg-[#0c1a2c] text-sky-600 dark:text-sky-400 shadow-sm'
-                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-                  }`}
-                >
-                  Weighted Points (+pts)
-                </button>
-                <button
-                  onClick={() => setChartMetric('RAW_SCORE')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition-all ${
-                    chartMetric === 'RAW_SCORE'
-                      ? 'bg-white dark:bg-[#0c1a2c] text-sky-600 dark:text-sky-400 shadow-sm'
-                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-                  }`}
-                >
-                  Raw Score (%)
-                </button>
+              <div className="flex flex-wrap items-center gap-2">
+                {courseBreakdowns.length > 1 && (
+                  <select
+                    value={primaryCourse?.courseId || ''}
+                    onChange={(e) => {
+                      const nextId = e.target.value;
+                      setSelectedCourseId(nextId);
+                      const nextCourse = courseBreakdowns.find((c) => c.courseId === nextId);
+                      const nextFullMod =
+                        nextCourse?.isFullModular || nextCourse?.requiresPractical === false;
+                      setChartMetric(nextFullMod ? 'RAW_SCORE' : 'CONTRIBUTION');
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 text-xs font-mono font-bold text-slate-900 dark:text-[#F8FAFC] outline-none"
+                  >
+                    {courseBreakdowns.map((c) => (
+                      <option key={c.courseId} value={c.courseId}>
+                        {c.courseCode}: {c.courseTitle}
+                      </option>
+                    ))}
+                  </select>
+                )}
+
+                <div className="flex items-center gap-1.5 p-1 rounded-2xl bg-slate-100 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 self-start sm:self-auto">
+                  <button
+                    onClick={() => setChartMetric('RAW_SCORE')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition-all ${
+                      chartMetricKey === 'RAW_SCORE'
+                        ? 'bg-white dark:bg-[#0c1a2c] text-sky-600 dark:text-sky-400 shadow-sm'
+                        : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                    }`}
+                  >
+                    Raw Score (%)
+                  </button>
+                  <button
+                    onClick={() => setChartMetric('CONTRIBUTION')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition-all ${
+                      chartMetricKey === 'CONTRIBUTION'
+                        ? 'bg-white dark:bg-[#0c1a2c] text-sky-600 dark:text-sky-400 shadow-sm'
+                        : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                    }`}
+                  >
+                    Weighted Points (+pts)
+                  </button>
+                </div>
               </div>
             </div>
 
             <div className="h-64 w-full">
               <AnimatePresence mode="wait">
                 <motion.div
-                  key={chartMetric}
+                  key={`${primaryCourse?.courseId || 'default'}-${chartMetricKey}`}
                   initial={{ opacity: 0, y: 12, scale: 0.98 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: -12, scale: 0.98, transition: { duration: 0.2, ease: easeOutCurve } }}
@@ -417,7 +596,7 @@ export default function GradesClient() {
                 >
                   <ImmersiveChartFrame
                     ready={!loading}
-                    triggerKey={`trainee-grades-${chartMetric}-${chartInView ? 'in' : 'wait'}`}
+                    triggerKey={`trainee-grades-${primaryCourse?.courseId || 'default'}-${chartMetricKey}-${chartInView ? 'in' : 'wait'}`}
                     duration={1.85}
                     className="w-full h-full"
                   >
@@ -431,11 +610,11 @@ export default function GradesClient() {
                         tickLine={false}
                       />
                       <YAxis
-                        domain={[0, chartMetric === 'CONTRIBUTION' ? 65 : 100]}
+                        domain={[0, chartMetricKey === 'CONTRIBUTION' && !isPrimaryFullModular ? 65 : 100]}
                         tick={{ fill: '#94a3b8', fontSize: 11, fontFamily: 'monospace' }}
                         axisLine={false}
                         tickLine={false}
-                        unit={chartMetric === 'CONTRIBUTION' ? ' pts' : '%'}
+                        unit={chartMetricKey === 'CONTRIBUTION' ? ' pts' : '%'}
                       />
                       <Tooltip
                         content={({ active, payload }) => {
@@ -445,7 +624,7 @@ export default function GradesClient() {
                               <div className="p-3 rounded-2xl bg-slate-900/95 text-white border border-slate-700 shadow-xl text-xs space-y-1 font-mono">
                                 <div className="font-bold text-sky-400">{item.fullName}</div>
                                 <div className="flex justify-between gap-4">
-                                  <span className="text-slate-400">Weight Category:</span>
+                                  <span className="text-slate-400">Weight Share:</span>
                                   <span className="font-bold text-slate-200">{item.weight}% Total</span>
                                 </div>
                                 <div className="flex justify-between gap-4">
@@ -467,7 +646,7 @@ export default function GradesClient() {
                         }}
                       />
                       <Bar
-                        dataKey={chartMetric === 'CONTRIBUTION' ? 'contribution' : 'score'}
+                        dataKey={chartMetricKey === 'CONTRIBUTION' ? 'contribution' : 'score'}
                         radius={[8, 8, 0, 0]}
                         isAnimationActive={true}
                         animationDuration={1800}
@@ -485,22 +664,41 @@ export default function GradesClient() {
             </div>
 
             <div className="pt-3 border-t border-slate-100 dark:border-slate-800/80 flex flex-wrap items-center justify-between gap-3 text-xs font-mono text-slate-500">
-              <div className="flex items-center gap-4">
-                <span className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-purple-500 inline-block" />
-                  <span>Attendance (10% Weight)</span>
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />
-                  <span>Practical Simulator (60% Weight)</span>
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-sky-500 inline-block" />
-                  <span>Theory Quizzes (40% Weight)</span>
-                </span>
+              <div className="flex flex-wrap items-center gap-4">
+                {isPrimaryFullModular ? (
+                  <>
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-sky-600 inline-block" />
+                      <span>Passed Quiz (≥75%)</span>
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block" />
+                      <span>Below Benchmark (&lt;75%)</span>
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    {primaryWeights.attendance > 0 && (
+                      <span className="flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-full bg-purple-500 inline-block" />
+                        <span>Attendance ({primaryWeights.attendance}% Weight)</span>
+                      </span>
+                    )}
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />
+                      <span>Practical Simulator ({primaryWeights.practical}% Weight)</span>
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-sky-500 inline-block" />
+                      <span>Theory Quizzes ({primaryWeights.moduleQuiz}% Weight)</span>
+                    </span>
+                  </>
+                )}
               </div>
               <span className="text-[11px] text-slate-400">
-                Passing Benchmark: 70.00% Cumulative STCW Score • Animates on screen entry
+                {isPrimaryFullModular
+                  ? 'Full Modular Grading: 100% Quiz-Based • 70% Overall Passing Benchmark'
+                  : 'Passing Benchmark: 70.00% Cumulative STCW Score'}
               </span>
             </div>
           </motion.div>
@@ -531,13 +729,21 @@ export default function GradesClient() {
             className="space-y-6"
           >
             {courseBreakdowns.map((cb) => {
-              const hasAtt = cb.components?.attendance !== undefined;
-              const hasPrac = cb.components?.practical !== undefined;
+              const weights = cb.weights || { attendance: 0, practical: 0, moduleQuiz: 0 };
+              const isFullModular = Boolean(
+                cb.isFullModular ||
+                  cb.requiresPractical === false ||
+                  cb.deliveryMode === 'FULL_MODULAR' ||
+                  (weights.attendance === 0 && weights.practical === 0)
+              );
+              const hasAtt = !isFullModular && cb.components?.attendance !== undefined && weights.attendance > 0;
+              const hasPrac = !isFullModular && cb.components?.practical !== undefined && weights.practical > 0;
               const hasMod = cb.components?.moduleQuiz !== undefined;
               const cbStatus = cb.status || 'IN_PROGRESS';
               const isFailedStatus = cbStatus === 'FAILED' || cbStatus === 'NEEDS_REMEDIATION';
-              const weights = cb.weights || { attendance: 0, practical: 0, moduleQuiz: 0 };
               const fmtPts = (v?: number) => (Number(v) || 0).toFixed(2);
+              const componentColCount = (hasAtt ? 1 : 0) + (hasPrac ? 1 : 0) + (hasMod ? 1 : 0);
+              const quizDetails = cb.components?.moduleQuiz?.quizDetails || [];
 
               return (
                 <motion.div
@@ -548,10 +754,15 @@ export default function GradesClient() {
                 {/* Course Header & Overall Score */}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
                   <div className="space-y-1">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-sky-500/10 text-sky-600 dark:text-sky-400">
                         {cb.courseCode}
                       </span>
+                      {isFullModular && (
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-indigo-500/10 text-indigo-600 dark:text-indigo-300 border border-indigo-500/20">
+                          Full Modular • 100% Quizzes
+                        </span>
+                      )}
                       <span className="text-xs font-mono text-slate-400">
                         Grading Policy: {cb.policyName || 'Standard Institutional Policy'}
                       </span>
@@ -568,7 +779,7 @@ export default function GradesClient() {
                         {cbStatus === 'PASSED'
                           ? `${cb.overallGrade}%`
                           : cb.overallGrade > 0
-                          ? `${cb.overallGrade}% (In Progress)`
+                          ? `${cb.overallGrade}%`
                           : 'In Progress'}
                       </div>
                       <div className="text-[10px] font-mono text-slate-400">
@@ -580,6 +791,8 @@ export default function GradesClient() {
                         className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold uppercase tracking-wider inline-flex items-center gap-1.5 ${
                           cbStatus === 'PASSED'
                             ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30'
+                            : cbStatus === 'NEEDS_REMEDIATION'
+                            ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30'
                             : isFailedStatus
                             ? 'bg-rose-500/15 text-rose-700 dark:text-rose-400 border border-rose-500/30'
                             : 'bg-blue-500/15 text-blue-700 dark:text-blue-400 border border-blue-500/30'
@@ -588,27 +801,37 @@ export default function GradesClient() {
                         {cbStatus === 'PASSED' && <CheckCircle2 className="w-3.5 h-3.5" />}
                         {isFailedStatus && <AlertTriangle className="w-3.5 h-3.5" />}
                         {!isFailedStatus && cbStatus !== 'PASSED' && <Clock className="w-3.5 h-3.5" />}
-                        {cbStatus.replace(/_/g, ' ')}
+                        {cbStatus === 'NEEDS_REMEDIATION' ? 'RETAKE NEEDED' : cbStatus.replace(/_/g, ' ')}
                       </span>
                     </div>
                   </div>
                 </div>
 
-                {/* Mandatory Safety / Attendance Warning if applicable */}
+                {/* Mandatory Quiz / Safety / Attendance Warning if applicable */}
                 {cb.hasMandatoryFailures && cb.mandatoryFailureReasons && (
                   <div className="p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-xs text-rose-700 dark:text-rose-400 flex items-start gap-2.5">
                     <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-600" />
                     <div>
-                      <span className="font-bold">Mandatory STCW Requirement Notice: </span>
+                      <span className="font-bold">
+                        {isFullModular ? 'Modular Assessment Notice: ' : 'Mandatory STCW Requirement Notice: '}
+                      </span>
                       {cb.mandatoryFailureReasons.join(' • ')}
                     </div>
                   </div>
                 )}
 
                 {/* Weighted Component Cards */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 font-mono">
-                  {/* Attendance Component */}
-                  {hasAtt && (
+                <div
+                  className={`grid grid-cols-1 gap-4 font-mono ${
+                    componentColCount >= 3
+                      ? 'md:grid-cols-3'
+                      : componentColCount === 2
+                      ? 'md:grid-cols-2'
+                      : 'md:grid-cols-1'
+                  }`}
+                >
+                  {/* Attendance Component (Never shown for Full Modular courses) */}
+                  {hasAtt && cb.components.attendance && (
                     <div className="p-4 rounded-2xl bg-purple-50/50 dark:bg-sky-500/15 border border-purple-200/60 dark:border-purple-900/40 space-y-2">
                       <div className="flex items-center justify-between text-xs">
                         <span className="font-bold text-purple-900 dark:text-purple-300">
@@ -643,12 +866,12 @@ export default function GradesClient() {
                     </div>
                   )}
 
-                  {/* Practical Simulator Component */}
-                  {hasPrac && (
+                  {/* Practical Simulator Component (Never shown for Full Modular courses) */}
+                  {hasPrac && cb.components.practical && (
                     <div className="p-4 rounded-2xl bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-200/60 dark:border-emerald-900/40 space-y-2">
                       <div className="flex items-center justify-between text-xs">
                         <span className="font-bold text-emerald-900 dark:text-emerald-300">
-                          2. Practical Simulator Drills
+                          {hasAtt ? '2. ' : '1. '}Practical Simulator Drills
                         </span>
                         <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-200/50 dark:bg-emerald-900/50 text-emerald-800 dark:text-emerald-300">
                           Weight: {weights.practical}%
@@ -683,10 +906,10 @@ export default function GradesClient() {
 
                   {/* Modular Quizzes Component */}
                   {hasMod && (
-                    <div className="p-4 rounded-2xl bg-blue-50/50 dark:bg-blue-950/20 border border-blue-200/60 dark:border-blue-900/40 space-y-2">
+                    <div className="p-4 rounded-2xl bg-blue-50/50 dark:bg-blue-950/20 border border-blue-200/60 dark:border-blue-900/40 space-y-3">
                       <div className="flex items-center justify-between text-xs">
                         <span className="font-bold text-blue-900 dark:text-blue-300">
-                          3. Modular Theory Quizzes
+                          {isFullModular ? 'Modular Quizzes & Assessments' : `${hasAtt ? '3. ' : '2. '}Modular Theory Quizzes`}
                         </span>
                         <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-200/50 dark:bg-blue-900/50 text-blue-800 dark:text-blue-300">
                           Weight: {weights.moduleQuiz}%
@@ -700,7 +923,7 @@ export default function GradesClient() {
                               : 'Pending'}
                           </div>
                           <div className="text-[10px] text-slate-500 dark:text-slate-400">
-                            Completed: {cb.components.moduleQuiz.completedCount ?? 0} tests
+                            Completed: {cb.components.moduleQuiz.completedCount ?? 0} of {cb.components.moduleQuiz.totalCount ?? 0} quizzes
                           </div>
                         </div>
                         <div className="text-right">
@@ -710,9 +933,38 @@ export default function GradesClient() {
                           <div className="text-[10px] text-slate-400">Contribution</div>
                         </div>
                       </div>
+
+                      {isFullModular && quizDetails.length > 0 && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 pt-2 border-t border-blue-200/40 dark:border-blue-900/40">
+                          {quizDetails.map((qd, qIdx) => {
+                            const label = qd.title.toLowerCase().includes('post')
+                              ? 'Course Post-Assessment'
+                              : `Module ${qd.title.match(/Module\s*(\d+)/i)?.[1] || qIdx + 1} Quiz`;
+                            const isAttempted = qd.attemptNumber > 0;
+                            return (
+                              <div
+                                key={qd.assessmentId}
+                                className={`px-3 py-2 rounded-xl border text-[11px] flex items-center justify-between gap-2 ${
+                                  !isAttempted
+                                    ? 'bg-white/60 dark:bg-slate-900/50 border-slate-200/70 dark:border-slate-800 text-slate-500'
+                                    : qd.passed
+                                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
+                                    : 'bg-rose-500/10 border-rose-500/30 text-rose-700 dark:text-rose-300'
+                                }`}
+                              >
+                                <span className="truncate font-semibold">{label}</span>
+                                <span className="font-extrabold shrink-0">
+                                  {isAttempted ? `${qd.score}%` : '--'}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
                       <div className="pt-2 border-t border-blue-200/40 dark:border-blue-900/40 flex items-center justify-between text-[10px]">
                         <span className="text-slate-500">Knowledge Benchmark</span>
-                        <span className="font-bold text-blue-600">Min. 75%</span>
+                        <span className="font-bold text-blue-600">Min. 75% per Quiz</span>
                       </div>
                     </div>
                   )}
@@ -723,7 +975,9 @@ export default function GradesClient() {
                   <div className="flex items-center gap-1.5">
                     <Info className="w-3.5 h-3.5 text-sky-500" />
                     <span>
-                      {weights.attendance > 0
+                      {isFullModular
+                        ? 'Formula: Final Grade = Modular Quizzes × 100% (No Practical Training or Physical Attendance)'
+                        : weights.attendance > 0
                         ? `Formula: Final = (Attendance × ${weights.attendance}%) + (Practical × ${weights.practical}%) + (Quizzes × ${weights.moduleQuiz}%) = 100% Total`
                         : `Formula: Final = (Practical × ${weights.practical}%) + (Quizzes × ${weights.moduleQuiz}%) = 100% Total`}
                     </span>
@@ -733,14 +987,14 @@ export default function GradesClient() {
                   </span>
                 </div>
               </motion.div>
-            );
-          })}
+              );
+            })}
           </motion.div>
         )}
       </div>
 
       {/* SECTION 2: RELEASED PRACTICAL ASSESSMENT RUBRIC FEEDBACK */}
-      {practicalFeedbacks.length > 0 && (
+      {hasPracticalCourses && practicalFeedbacks.length > 0 && (
         <div className="space-y-4">
           <div className="flex items-center gap-2">
             <Compass className="w-5 h-5 text-emerald-500" />
@@ -942,28 +1196,57 @@ export default function GradesClient() {
                   : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
               }`}
             >
-              All Assessments ({grades.length})
+              {allFullModular ? `All Quizzes (${modularList.length})` : `All Assessments (${grades.length})`}
             </button>
-            <button
-              onClick={() => setFilterMode('MODULAR')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition-all ${
-                filterMode === 'MODULAR'
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
-              }`}
-            >
-              Modular Quizzes ({modularList.length})
-            </button>
-            <button
-              onClick={() => setFilterMode('PRACTICAL')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition-all ${
-                filterMode === 'PRACTICAL'
-                  ? 'bg-emerald-600 text-white shadow-sm'
-                  : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
-              }`}
-            >
-              Practical Drills ({practicalList.length})
-            </button>
+            {allFullModular ? (
+              <>
+                <button
+                  onClick={() => setFilterMode('PRE_TEST')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition-all ${
+                    filterMode === 'PRE_TEST'
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
+                  }`}
+                >
+                  Module Quizzes ({preTestList.length})
+                </button>
+                <button
+                  onClick={() => setFilterMode('POST_TEST')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition-all ${
+                    filterMode === 'POST_TEST'
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
+                  }`}
+                >
+                  Final Post-Assessments ({postTestList.length})
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={() => setFilterMode('MODULAR')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition-all ${
+                    filterMode === 'MODULAR'
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
+                  }`}
+                >
+                  Modular Quizzes ({modularList.length})
+                </button>
+                {(hasPracticalCourses || practicalList.length > 0) && (
+                  <button
+                    onClick={() => setFilterMode('PRACTICAL')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition-all ${
+                      filterMode === 'PRACTICAL'
+                        ? 'bg-emerald-600 text-white shadow-sm'
+                        : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
+                    }`}
+                  >
+                    Practical Drills ({practicalList.length})
+                  </button>
+                )}
+              </>
+            )}
           </div>
         </div>
 

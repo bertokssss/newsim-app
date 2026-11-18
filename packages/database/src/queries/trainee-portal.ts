@@ -9,6 +9,14 @@ import { calculateTraineeCourseGrade, isInHouseModularCourse, courseRequiresPrac
  * trainee Grades page (courseTitle / status / weights / components ...).
  * The raw breakdown fields are preserved for backwards compatibility.
  */
+function sanitizeModularAssessmentTitle(title?: string | null, isFullModular?: boolean): string {
+  const raw = String(title || '').trim();
+  if (!raw || !isFullModular) return raw;
+  return raw
+    .replace(/\(Prerequisite for Practical Training\)/gi, '(Comprehensive Final Modular Assessment)')
+    .replace(/&\s*Practical Simulator Readiness/gi, '& Applied Operational Competency');
+}
+
 function toTraineeCourseBreakdownView(b: CourseGradeBreakdown) {
   const att = b.attendanceComponent;
   const prac = b.practicalComponent;
@@ -18,55 +26,79 @@ function toTraineeCourseBreakdownView(b: CourseGradeBreakdown) {
   const modDetails = mod?.details || {};
   const minAttendancePct = Number(attDetails.requiredMinimumPct) || 80;
   const requiresPractical = b.requiresPractical ?? !pracDetails.isFullModular;
+  const isFullModular = b.deliveryMode === 'FULL_MODULAR' || !requiresPractical;
   const competencyStatus = !requiresPractical
     ? 'NOT_REQUIRED'
     : (pracDetails.competencyStatus && pracDetails.competencyStatus !== 'NOT_EVALUATED'
       ? String(pracDetails.competencyStatus)
       : (pracDetails.allCompetenciesCompleted ? 'COMPETENT' : undefined));
 
+  const attWeight = isFullModular ? 0 : (att?.weight ?? 0);
+  const pracWeight = isFullModular ? 0 : (prac?.weight ?? 0);
+  const modWeight = isFullModular ? 100 : (mod?.weight ?? 100);
+
+  const includeAttendance = !isFullModular && (attWeight > 0 || Number(attDetails.totalSessions) > 0);
+  const includePractical = !isFullModular;
+
+  const rawQuizzes = Array.isArray(modDetails.assessments) ? modDetails.assessments : [];
+  const quizDetails = rawQuizzes.map((q: any) => ({
+    ...q,
+    title: sanitizeModularAssessmentTitle(q.title, isFullModular),
+  }));
+
   return {
     ...b,
     courseTitle: b.courseName,
     courseCategory: b.courseCategory || (requiresPractical ? 'Safety and Other STCW Courses' : 'In-House Courses'),
-    deliveryMode: b.deliveryMode || (requiresPractical ? 'MODULAR_AND_PRACTICAL' : 'FULL_MODULAR'),
-    requiresPractical,
+    deliveryMode: isFullModular ? 'FULL_MODULAR' : 'MODULAR_AND_PRACTICAL',
+    isFullModular,
+    requiresPractical: !isFullModular,
     overallGrade: b.overallScore ?? 0,
     status: b.finalStatus || 'IN_PROGRESS',
-    minAttendancePct,
-    practicalCompetencyRequired: requiresPractical,
+    minAttendancePct: isFullModular ? 0 : minAttendancePct,
+    practicalCompetencyRequired: !isFullModular,
     isCompliant: b.mandatoryRequirementsMet,
     hasMandatoryFailures: !b.mandatoryRequirementsMet,
     mandatoryFailureReasons: b.mandatoryRemarks || [],
     weights: {
-      attendance: att?.weight ?? 0,
-      practical: prac?.weight ?? 0,
-      moduleQuiz: mod?.weight ?? 0,
+      attendance: attWeight,
+      practical: pracWeight,
+      moduleQuiz: modWeight,
     },
     components: {
-      attendance: {
-        score: att?.score ?? 0,
-        weight: att?.weight ?? 0,
-        weightedContribution: att?.contribution ?? 0,
-        meetsRequirement:
-          Number(attDetails.totalSessions) > 0 &&
-          Number(attDetails.attendancePercentage) >= minAttendancePct,
-        minRequired: minAttendancePct,
-        totalSessions: Number(attDetails.totalSessions) || 0,
-        present: Number(attDetails.presentSessions) || 0,
-        late: Number(attDetails.lateSessions) || 0,
-      },
-      practical: {
-        score: prac?.score ?? 0,
-        weight: prac?.weight ?? 0,
-        weightedContribution: prac?.contribution ?? 0,
-        competencyStatus,
-      },
+      ...(includeAttendance
+        ? {
+            attendance: {
+              score: att?.score ?? 0,
+              weight: attWeight,
+              weightedContribution: att?.contribution ?? 0,
+              meetsRequirement:
+                Number(attDetails.totalSessions) > 0 &&
+                Number(attDetails.attendancePercentage) >= minAttendancePct,
+              minRequired: minAttendancePct,
+              totalSessions: Number(attDetails.totalSessions) || 0,
+              present: Number(attDetails.presentSessions) || 0,
+              late: Number(attDetails.lateSessions) || 0,
+            },
+          }
+        : {}),
+      ...(includePractical
+        ? {
+            practical: {
+              score: prac?.score ?? 0,
+              weight: pracWeight,
+              weightedContribution: prac?.contribution ?? 0,
+              competencyStatus,
+            },
+          }
+        : {}),
       moduleQuiz: {
         score: mod?.score ?? 0,
-        weight: mod?.weight ?? 0,
+        weight: modWeight,
         weightedContribution: mod?.contribution ?? 0,
         completedCount: Number(modDetails.completedQuizzes ?? modDetails.completedAssessments) || 0,
         totalCount: Number(modDetails.totalQuizzes ?? modDetails.totalAssessments) || 0,
+        quizDetails,
       },
     },
   };
@@ -1833,13 +1865,34 @@ export async function getTraineeGradesList(traineeId: string) {
   // 1. Fetch trainee's valid enrolled courses first (strictly limit grades to enrolled courses)
   const { data: traineeEnrollments } = await supabaseAdmin
     .from('enrollments')
-    .select('course_id, status')
+    .select('course_id, status, created_at, courses (id, code, name, category, practical_days)')
     .eq('trainee_id', resolvedId)
-    .in('status', ['ENROLLED', 'ONGOING', 'COMPLETED', 'ACTIVE', 'APPROVED']);
+    .in('status', ['ENROLLED', 'ONGOING', 'COMPLETED', 'ACTIVE', 'APPROVED'])
+    .order('created_at', { ascending: false });
+
+  // Order active/ongoing enrollments before completed ones
+  const sortedEnrollments = [...(traineeEnrollments || [])].sort((a: any, b: any) => {
+    const rank = (s: string) => {
+      const u = (s || '').toUpperCase();
+      if (u === 'ACTIVE' || u === 'ONGOING' || u === 'ENROLLED') return 0;
+      if (u === 'APPROVED') return 1;
+      return 2;
+    };
+    return rank(a.status) - rank(b.status);
+  });
 
   const enrolledCourseIds = Array.from(
-    new Set((traineeEnrollments || []).map((e: any) => e.course_id).filter(Boolean))
+    new Set(sortedEnrollments.map((e: any) => e.course_id).filter(Boolean))
   ) as string[];
+
+  const fullModularCourseIdSet = new Set<string>();
+  sortedEnrollments.forEach((e: any) => {
+    const crs = Array.isArray(e.courses) ? e.courses[0] : e.courses;
+    if (e.course_id && isInHouseModularCourse(crs?.category, crs?.practical_days)) {
+      fullModularCourseIdSet.add(e.course_id);
+    }
+  });
+  const practicalCourseIds = enrolledCourseIds.filter((cid) => !fullModularCourseIdSet.has(cid));
 
   if (enrolledCourseIds.length === 0) {
     const emptyResult: any = [];
@@ -1858,6 +1911,9 @@ export async function getTraineeGradesList(traineeId: string) {
       totalAssessments: 0,
       isModularQualified: false,
       isPracticalQualified: false,
+      hasPracticalCourses: false,
+      allFullModular: false,
+      isOverallQualified: false,
     };
     return emptyResult;
   }
@@ -1867,7 +1923,7 @@ export async function getTraineeGradesList(traineeId: string) {
       .from('grades')
       .select(`
         *,
-        courses (id, code, name)
+        courses (id, code, name, category, practical_days)
       `)
       .eq('trainee_id', resolvedId)
       .in('course_id', enrolledCourseIds)
@@ -1875,10 +1931,10 @@ export async function getTraineeGradesList(traineeId: string) {
     supabaseAdmin
       .from('assessment_attempts')
       .select(`
-        id, score, status, passed, submitted_at,
+        id, attempt_number, score, status, passed, submitted_at,
         assessments (
           id, title, assessment_type, passing_score, module_id, course_id,
-          courses (id, code, name),
+          courses (id, code, name, category, practical_days),
           course_modules (id, title, sort_order)
         )
       `)
@@ -1888,9 +1944,16 @@ export async function getTraineeGradesList(traineeId: string) {
 
   const gradesData = gradesRes.data || [];
   const rawAttemptsData = attemptsRes.data || [];
+
+  // Deduplicate to the latest attempt per assessment_id so retakes don't double-count in averages
+  const seenAssessmentIds = new Set<string>();
   const attemptsData = rawAttemptsData.filter((att: any) => {
     const asm = att.assessments as any;
-    return asm?.course_id && enrolledCourseIds.includes(asm.course_id);
+    if (!asm?.course_id || !enrolledCourseIds.includes(asm.course_id)) return false;
+    if (!asm?.id) return true;
+    if (seenAssessmentIds.has(asm.id)) return false;
+    seenAssessmentIds.add(asm.id);
+    return true;
   });
 
   const list: any[] = [];
@@ -1899,13 +1962,23 @@ export async function getTraineeGradesList(traineeId: string) {
   // 1. Process granular assessment attempts
   attemptsData.forEach((att: any) => {
     const asm = att.assessments as any;
+    const crs = Array.isArray(asm?.courses) ? asm.courses[0] : asm?.courses;
+    const isCourseFullModular =
+      fullModularCourseIdSet.has(asm?.course_id) ||
+      isInHouseModularCourse(crs?.category, crs?.practical_days);
+
     const asmType = String(asm?.assessment_type || '').toUpperCase();
-    const isModular = Boolean(asm?.module_id) || asmType === 'WRITTEN' || asmType === 'QUIZ' || asmType === 'EXAM';
+    const isModular =
+      isCourseFullModular ||
+      Boolean(asm?.module_id) ||
+      asmType === 'WRITTEN' ||
+      asmType === 'QUIZ' ||
+      asmType === 'EXAM';
     const scoreNum = Number(att.score) || 0;
     const passingThreshold = asm?.passing_score != null && !isNaN(Number(asm.passing_score)) ? Number(asm.passing_score) : 75;
     const isPassed = att.status === 'PASSED' || att.passed === true || scoreNum >= passingThreshold;
     const modOrder = asm?.course_modules?.sort_order;
-    const modTitle = asm?.course_modules?.title;
+    const modTitle = sanitizeModularAssessmentTitle(asm?.course_modules?.title, isCourseFullModular);
 
     const assessmentCode = asm?.module_id
       ? `MOD-${modOrder ?? (asm?.title?.match(/Module\s*(\d+)/i)?.[1] || 'PRE')}`
@@ -1915,18 +1988,24 @@ export async function getTraineeGradesList(traineeId: string) {
       coveredAttemptCourseKeys.add(asm.course_id);
     }
 
+    const cleanTitle = sanitizeModularAssessmentTitle(asm?.title, isCourseFullModular);
+
     list.push({
       id: att.id,
       attemptId: att.id,
+      attemptNumber: att.attempt_number || 1,
       assessmentId: asm?.id,
-      assessmentTitle: asm?.title || (isModular ? 'Module Theory Pre-Test' : 'Practical Simulator Drill'),
+      assessmentTitle: cleanTitle || (isModular ? 'Module Theory Quiz' : 'Practical Simulator Drill'),
       assessmentCode,
       moduleTitle: modTitle || (isModular ? 'Modular Knowledge Unit' : null),
       category: isModular ? 'MODULAR' : 'PRACTICAL',
-      type: isModular ? 'Modular Theory' : 'Practical Simulator',
+      isFullModularCourse: isCourseFullModular,
+      type: isCourseFullModular
+        ? (asm?.module_id ? 'Module Quiz' : 'Course Final Assessment')
+        : (isModular ? 'Modular Theory' : 'Practical Simulator'),
       courseId: asm?.course_id || null,
-      courseCode: asm?.courses?.code || 'STCW',
-      courseTitle: asm?.courses?.name || 'Maritime Training Program',
+      courseCode: crs?.code || 'STCW',
+      courseTitle: crs?.name || 'Maritime Training Program',
       score: scoreNum,
       maxScore: 100,
       percentage: scoreNum,
@@ -1935,8 +2014,8 @@ export async function getTraineeGradesList(traineeId: string) {
       grade: isPassed ? 'PASSED' : 'FAILED',
       status: 'COMPLETED',
       feedback: isPassed
-        ? `Score: ${scoreNum}%. STCW Competency benchmark satisfied (${passingThreshold}% threshold).`
-        : `Score: ${scoreNum}%. Benchmark requirement was ${passingThreshold}%. Remedial review recommended.`,
+        ? `Score: ${scoreNum}%. Competency benchmark satisfied (${passingThreshold}% threshold).`
+        : `Score: ${scoreNum}%. Minimum passing score is ${passingThreshold}%. You may retake this assessment before your deadline.`,
       date: att.submitted_at
         ? new Date(att.submitted_at).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
         : 'Recent',
@@ -1947,22 +2026,29 @@ export async function getTraineeGradesList(traineeId: string) {
   // 2. Process any course-level grades not already represented by attempts
   gradesData.forEach((g: any) => {
     if (!coveredAttemptCourseKeys.has(g.course_id)) {
+      const crs = Array.isArray(g.courses) ? g.courses[0] : g.courses;
+      const isCourseFullModular =
+        fullModularCourseIdSet.has(g.course_id) ||
+        isInHouseModularCourse(crs?.category, crs?.practical_days);
       const scoreNum = Number(g.final_score) || 0;
       const isPassed = g.grade === 'PASSED' || g.status === 'PASSED' || scoreNum >= 75;
-      const isPrac = g.remarks?.toLowerCase()?.includes('practical') || g.courses?.name?.toLowerCase()?.includes('simulator');
+      const isPrac =
+        !isCourseFullModular &&
+        (g.remarks?.toLowerCase()?.includes('practical') || crs?.name?.toLowerCase()?.includes('simulator'));
 
       list.push({
         id: g.id,
         attemptId: null,
         assessmentId: null,
-        assessmentTitle: isPrac ? `${g.courses?.name || 'Course'} Practical Evaluation` : `${g.courses?.name || 'Course'} Modular Theory`,
-        assessmentCode: g.courses?.code || (isPrac ? 'PRAC-EVAL' : 'MOD-EVAL'),
+        assessmentTitle: isPrac ? `${crs?.name || 'Course'} Practical Evaluation` : `${crs?.name || 'Course'} Modular Quizzes`,
+        assessmentCode: crs?.code || (isPrac ? 'PRAC-EVAL' : 'MOD-EVAL'),
         moduleTitle: null,
         category: isPrac ? 'PRACTICAL' : 'MODULAR',
-        type: isPrac ? 'Practical Simulator' : 'Modular Theory',
+        isFullModularCourse: isCourseFullModular,
+        type: isCourseFullModular ? 'Course Quiz Summary' : (isPrac ? 'Practical Simulator' : 'Modular Theory'),
         courseId: g.course_id,
-        courseCode: g.courses?.code || 'STCW',
-        courseTitle: g.courses?.name || 'Maritime Training Program',
+        courseCode: crs?.code || 'STCW',
+        courseTitle: crs?.name || 'Maritime Training Program',
         score: scoreNum,
         maxScore: 100,
         percentage: scoreNum,
@@ -2009,32 +2095,40 @@ export async function getTraineeGradesList(traineeId: string) {
   );
   const courseBreakdowns: any[] = breakdownResults.filter(Boolean);
 
-  // 4. Fetch released practical assessment evaluations & criteria feedback (Section 1.4)
-  const { data: practicalEvals } = await supabaseAdmin
-    .from('practical_evaluations')
-    .select(`
-      id,
-      rubric_id,
-      course_id,
-      total_score,
-      max_possible_score,
-      percentage,
-      competency_status,
-      status,
-      general_feedback,
-      strengths,
-      improvements_required,
-      remediation_plan,
-      evaluation_date,
-      courses (id, code, name),
-      practical_rubrics (title, stcw_reference, passing_score),
-      instructors:profiles!practical_evaluations_instructor_id_fkey (first_name, last_name, avatar_url)
-    `)
-    .eq('trainee_id', resolvedId)
-    .in('course_id', enrolledCourseIds)
-    .in('status', ['SUBMITTED', 'FINALIZED']);
+  // 4. Fetch released practical assessment evaluations & criteria feedback ONLY for courses requiring practical
+  let practicalEvals: any[] = [];
+  if (practicalCourseIds.length > 0) {
+    const { data: peRows } = await supabaseAdmin
+      .from('practical_evaluations')
+      .select(`
+        id,
+        rubric_id,
+        course_id,
+        total_score,
+        max_possible_score,
+        percentage,
+        competency_status,
+        status,
+        general_feedback,
+        strengths,
+        improvements_required,
+        remediation_plan,
+        evaluation_date,
+        courses (id, code, name, category, practical_days),
+        practical_rubrics (title, stcw_reference, passing_score),
+        instructors:profiles!practical_evaluations_instructor_id_fkey (first_name, last_name, avatar_url)
+      `)
+      .eq('trainee_id', resolvedId)
+      .in('course_id', practicalCourseIds)
+      .in('status', ['SUBMITTED', 'FINALIZED']);
 
-  const evalIds = (practicalEvals || []).map((pe: any) => pe.id).filter(Boolean);
+    practicalEvals = (peRows || []).filter((pe: any) => {
+      const crs = Array.isArray(pe.courses) ? pe.courses[0] : pe.courses;
+      return !isInHouseModularCourse(crs?.category, crs?.practical_days);
+    });
+  }
+
+  const evalIds = practicalEvals.map((pe: any) => pe.id).filter(Boolean);
   const scoresByEvalId = new Map<string, any[]>();
   if (evalIds.length > 0) {
     const { data: allScores } = await supabaseAdmin
@@ -2050,7 +2144,7 @@ export async function getTraineeGradesList(traineeId: string) {
   }
 
   const practicalFeedbacks: any[] = [];
-  for (const pe of (practicalEvals || [])) {
+  for (const pe of practicalEvals) {
     const scores = scoresByEvalId.get(pe.id) || [];
 
     const crs = Array.isArray(pe.courses) ? pe.courses[0] : pe.courses;
@@ -2087,6 +2181,17 @@ export async function getTraineeGradesList(traineeId: string) {
     });
   }
 
+  const hasPracticalCourses = courseBreakdowns.some(
+    (cb: any) => cb.requiresPractical !== false && !cb.isFullModular
+  );
+  const allFullModular = courseBreakdowns.length > 0 && !hasPracticalCourses;
+  const isModularQualified = modularGrades.length > 0 && modularPassedCount === modularGrades.length;
+  const isPracticalQualified = !hasPracticalCourses
+    ? true
+    : (practicalGrades.length > 0 && practicalPassedCount === practicalGrades.length);
+  const isOverallQualified =
+    courseBreakdowns.length > 0 && courseBreakdowns.every((cb: any) => cb.status === 'PASSED');
+
   const summary = {
     modularAverage,
     practicalAverage,
@@ -2096,8 +2201,11 @@ export async function getTraineeGradesList(traineeId: string) {
     practicalPassedCount,
     practicalTotal: practicalGrades.length,
     totalAssessments: list.length,
-    isModularQualified: modularGrades.length > 0 && modularPassedCount === modularGrades.length,
-    isPracticalQualified: practicalGrades.length > 0 && practicalPassedCount === practicalGrades.length,
+    isModularQualified,
+    isPracticalQualified,
+    hasPracticalCourses,
+    allFullModular,
+    isOverallQualified,
   };
 
   const result: any = list;

@@ -84,6 +84,9 @@ export function courseRequiresPractical(category?: string | null, practicalDays?
  */
 export async function getGradingPolicy(courseId?: string): Promise<GradingPolicy> {
   let courseCategory: string | null = null;
+  let coursePracticalDays: number | null = null;
+  let resolvedCoursePolicy: any = null;
+
   if (courseId) {
     const [{ data: coursePolicy }, { data: courseRow }] = await Promise.all([
       supabaseAdmin
@@ -94,16 +97,14 @@ export async function getGradingPolicy(courseId?: string): Promise<GradingPolicy
         .maybeSingle(),
       supabaseAdmin
         .from('courses')
-        .select('category')
+        .select('category, practical_days')
         .eq('id', courseId)
         .maybeSingle(),
     ]);
 
     courseCategory = courseRow?.category || null;
-
-    if (coursePolicy) {
-      return mapPolicyRecord(coursePolicy);
-    }
+    coursePracticalDays = courseRow?.practical_days ?? null;
+    resolvedCoursePolicy = coursePolicy;
   }
 
   // Fallback to institutional default policy
@@ -115,7 +116,9 @@ export async function getGradingPolicy(courseId?: string): Promise<GradingPolicy
     .limit(1)
     .maybeSingle();
 
-  const basePolicy: GradingPolicy = defaultPolicy
+  const basePolicy: GradingPolicy = resolvedCoursePolicy
+    ? mapPolicyRecord(resolvedCoursePolicy)
+    : defaultPolicy
     ? mapPolicyRecord(defaultPolicy)
     : {
         id: 'default-policy',
@@ -132,11 +135,11 @@ export async function getGradingPolicy(courseId?: string): Promise<GradingPolicy
         status: 'ACTIVE',
       };
 
-  // In-House Courses are Full Modular-Based Courses (100% Modular Written, no practical phase required)
-  if (isInHouseModularCourse(courseCategory)) {
+  // Full Modular / In-House courses are 100% Modular Quizzes (no practical phase or physical attendance)
+  if (isInHouseModularCourse(courseCategory, coursePracticalDays)) {
     return {
       ...basePolicy,
-      name: 'NEWSIM In-House Full Modular Grading Policy (100% Modular Written / 70% Passing)',
+      name: 'NEWSIM Full Modular Grading Policy (100% Modular Quizzes / 70% Passing)',
       attendanceWeight: 0,
       practicalWeight: 0,
       moduleQuizWeight: 100,
@@ -283,7 +286,7 @@ export async function calculateTraineeCourseGrade(params: {
   ] = await Promise.all([
     supabaseAdmin
       .from('courses')
-      .select('id, code, name, category')
+      .select('id, code, name, category, practical_days')
       .eq('id', courseId)
       .single(),
     getGradingPolicy(courseId),
@@ -329,13 +332,16 @@ export async function calculateTraineeCourseGrade(params: {
   ]);
 
   const course = courseRes.data;
+  const isFullModular = isInHouseModularCourse(course?.category, course?.practical_days);
   const courseScheds = courseSchedsRes.data;
   const courseSchedIdSet = new Set<string>((courseScheds || []).map((s: any) => s.id).filter(Boolean));
-  const rawAttendanceRows = (traineeAttendanceRes.data || []).filter(
-    (att: any) => att.course_id === courseId || (att.schedule_id && courseSchedIdSet.has(att.schedule_id))
-  );
-  const courseRubrics = courseRubricsRes.data;
-  const allPracticalEvals = allPracticalEvalsRes.data;
+  const rawAttendanceRows = isFullModular
+    ? []
+    : (traineeAttendanceRes.data || []).filter(
+        (att: any) => att.course_id === courseId || (att.schedule_id && courseSchedIdSet.has(att.schedule_id))
+      );
+  const courseRubrics = isFullModular ? [] : courseRubricsRes.data;
+  const allPracticalEvals = isFullModular ? [] : allPracticalEvalsRes.data;
   const moduleAssessments = moduleAssessmentsRes.data;
 
   // 2. Attendance Component Computation (matches both direct course_id and course schedule_id records)
@@ -344,7 +350,7 @@ export async function calculateTraineeCourseGrade(params: {
     return ['PRESENT', 'LATE', 'EXCUSED', 'ABSENT'].includes(st);
   });
 
-  const totalSessions = attendanceRows.length;
+  const totalSessions = isFullModular ? 0 : attendanceRows.length;
   let presentSessions = 0;
   let lateSessions = 0;
   let excusedSessions = 0;
@@ -360,41 +366,45 @@ export async function calculateTraineeCourseGrade(params: {
 
   let attendanceScore: number | null = null;
   let attendancePct = 0;
-  let attendanceStatus: 'PENDING' | 'COMPLETED' | 'NOT_STARTED' | 'FAILED' = 'NOT_STARTED';
+  let attendanceStatus: 'PENDING' | 'COMPLETED' | 'NOT_STARTED' | 'FAILED' = isFullModular ? 'COMPLETED' : 'NOT_STARTED';
 
-  if (totalSessions > 0) {
-    let effectiveDenominator = totalSessions;
-    if (policy.excusedMode === 'EXCLUDE') {
-      effectiveDenominator = Math.max(1, totalSessions - excusedSessions);
+  if (!isFullModular) {
+    if (totalSessions > 0) {
+      let effectiveDenominator = totalSessions;
+      if (policy.excusedMode === 'EXCLUDE') {
+        effectiveDenominator = Math.max(1, totalSessions - excusedSessions);
+      }
+
+      const earnedUnits = (presentSessions * 100) + (lateSessions * policy.lateCreditPct) + (policy.excusedMode === 'FULL_CREDIT' ? excusedSessions * 100 : 0);
+      attendanceScore = Math.min(100, Math.round(earnedUnits / effectiveDenominator));
+      attendancePct = Math.round(((presentSessions + lateSessions) / totalSessions) * 100);
+      attendanceStatus = attendancePct >= policy.minAttendancePct ? 'COMPLETED' : 'FAILED';
+    } else {
+      attendanceStatus = 'PENDING';
     }
-
-    const earnedUnits = (presentSessions * 100) + (lateSessions * policy.lateCreditPct) + (policy.excusedMode === 'FULL_CREDIT' ? excusedSessions * 100 : 0);
-    attendanceScore = Math.min(100, Math.round(earnedUnits / effectiveDenominator));
-    attendancePct = Math.round(((presentSessions + lateSessions) / totalSessions) * 100);
-    attendanceStatus = attendancePct >= policy.minAttendancePct ? 'COMPLETED' : 'FAILED';
-  } else {
-    attendanceStatus = 'PENDING';
   }
 
-  const attendanceContribution = attendanceScore !== null 
-    ? Number(((attendanceScore * policy.attendanceWeight) / 100).toFixed(2)) 
+  const effectiveAttendanceWeight = isFullModular ? 0 : policy.attendanceWeight;
+  const attendanceContribution = !isFullModular && attendanceScore !== null
+    ? Number(((attendanceScore * effectiveAttendanceWeight) / 100).toFixed(2))
     : null;
 
   const attendanceComponent: ComponentGrade = {
-    name: 'Attendance and Punctuality',
-    weight: policy.attendanceWeight,
-    score: attendanceScore,
+    name: isFullModular ? 'Attendance (Not Required — Full Modular Course)' : 'Attendance and Punctuality',
+    weight: effectiveAttendanceWeight,
+    score: isFullModular ? null : attendanceScore,
     maxScore: 100,
     contribution: attendanceContribution,
     status: attendanceStatus,
     details: {
+      isFullModular,
       totalSessions,
       presentSessions,
       lateSessions,
       excusedSessions,
       absentSessions,
       attendancePercentage: attendancePct,
-      requiredMinimumPct: policy.minAttendancePct,
+      requiredMinimumPct: isFullModular ? 0 : policy.minAttendancePct,
       lateCreditPct: policy.lateCreditPct,
     },
   };
@@ -529,21 +539,22 @@ export async function calculateTraineeCourseGrade(params: {
     attendanceCausedPracticalFailure = true;
   }
 
-  const practicalWeight = policy.practicalWeight != null ? policy.practicalWeight : 60;
-  const isFullModular = isInHouseModularCourse(course?.category) && (practicalWeight === 0 || !policy.practicalCompetencyRequired);
+  const practicalWeight = isFullModular ? 0 : (policy.practicalWeight != null ? policy.practicalWeight : 60);
 
   if (isFullModular) {
     allPracticalPassed = true;
     practicalCompetencyMet = true;
-    practicalScore = 100;
+    practicalScore = null;
     practicalStatus = 'COMPLETED';
     attendanceCausedPracticalFailure = false;
   }
 
-  const practicalContribution = (allPracticalPassed && practicalScore !== null)
+  const practicalContribution = isFullModular
+    ? 0.0
+    : (allPracticalPassed && practicalScore !== null)
     ? Number(((practicalScore * practicalWeight) / 100).toFixed(2))
     : 0.0;
-  const provisionalPracticalPoints = practicalScore !== null
+  const provisionalPracticalPoints = !isFullModular && practicalScore !== null
     ? Number(((practicalScore * practicalWeight) / 100).toFixed(2))
     : null;
 
@@ -671,16 +682,16 @@ export async function calculateTraineeCourseGrade(params: {
   }
 
   // Written contribution: Written Assessment Percentage * (moduleQuizWeight / 100)
-  const moduleWeight = policy.moduleQuizWeight != null ? policy.moduleQuizWeight : 40;
-  const writtenContribution = (allWrittenPassed && writtenScore !== null)
-    ? Number(((writtenScore * moduleWeight) / 100).toFixed(2))
-    : 0.0;
+  const moduleWeight = isFullModular ? 100 : (policy.moduleQuizWeight != null ? policy.moduleQuizWeight : 40);
   const provisionalWrittenPoints = writtenScore !== null
     ? Number(((writtenScore * moduleWeight) / 100).toFixed(2))
     : null;
+  const writtenContribution = provisionalWrittenPoints ?? 0.0;
 
   const moduleComponent: ComponentGrade = {
-    name: `Written Assessments (${moduleWeight}% Weight - Min 70% to Pass)`,
+    name: isFullModular
+      ? `Modular Quizzes (${moduleWeight}% Weight - Min 70% Overall / 75% per Quiz)`
+      : `Written Assessments (${moduleWeight}% Weight - Min 70% to Pass)`,
     weight: moduleWeight,
     score: writtenScore,
     maxScore: 100,
@@ -698,26 +709,25 @@ export async function calculateTraineeCourseGrade(params: {
   };
 
   // 5. Final Course Completion Decision & Integrity Rules
-  // Formula: Final Grade = (Practical Component x 0.60) + (Written Assessment Percentage x 0.40)
   const mandatoryRemarks: string[] = [];
   let mandatoryRequirementsMet = true;
 
-  // Check Attendance Quorum (Min 80%)
-  const attendancePassed = totalSessions === 0 ? true : attendancePct >= policy.minAttendancePct;
-  if (!attendancePassed) {
+  // Check Attendance Quorum (Min 80%) — skipped for Full Modular courses
+  const attendancePassed = isFullModular || totalSessions === 0 ? true : attendancePct >= policy.minAttendancePct;
+  if (!isFullModular && !attendancePassed) {
     mandatoryRequirementsMet = false;
     mandatoryRemarks.push(`Attendance quorum failed: Candidate attended ${attendancePct}% (required STCW minimum is ${policy.minAttendancePct}%).`);
   }
 
-  if (attendanceCausedPracticalFailure) {
+  if (!isFullModular && attendanceCausedPracticalFailure) {
     mandatoryRequirementsMet = false;
     mandatoryRemarks.push(
       `Practical assessment failed due to attendance deductions (-${attendancePracticalDeductions} pts from ${absentSessions} absent, ${lateSessions} late sessions). Certificate release blocked.`
     );
   }
 
-  // Check Practical Assessment (All competencies must be passed)
-  if (!allPracticalPassed) {
+  // Check Practical Assessment (All competencies must be passed) — skipped for Full Modular courses
+  if (!isFullModular && !allPracticalPassed) {
     mandatoryRequirementsMet = false;
     mandatoryRemarks.push('Practical maritime competencies incomplete or pending retake: Candidate must successfully demonstrate all required exercises.');
   }
@@ -726,17 +736,23 @@ export async function calculateTraineeCourseGrade(params: {
   if (!allWrittenPassed) {
     mandatoryRequirementsMet = false;
     if (writtenScore !== null && writtenScore < 70) {
-      mandatoryRemarks.push(`Written examination score (${writtenScore}%) does not meet mandatory 70% passing threshold.`);
+      mandatoryRemarks.push(`Modular quiz average (${writtenScore}%) does not meet mandatory 70% passing threshold.`);
     } else {
-      mandatoryRemarks.push('One or more required module written assessments remain unpassed or pending.');
+      const failedQuiz = quizScores.find((q) => q.attemptNumber > 0 && !q.passed);
+      if (failedQuiz) {
+        mandatoryRemarks.push(
+          `"${failedQuiz.title}" scored ${failedQuiz.score}% (requires ${failedQuiz.passingScoreRequired}% — retake available before deadline).`
+        );
+      } else {
+        mandatoryRemarks.push('One or more required modular quizzes remain unpassed or pending.');
+      }
     }
   }
 
   // Overall Score Calculation:
-  // If in progress or pending, show provisional numerical score
+  // If in progress or pending, compute provisional weighted score from attempted components
   const hasPending =
-    practicalStatus === 'PENDING' ||
-    practicalStatus === 'NOT_STARTED' ||
+    (!isFullModular && (practicalStatus === 'PENDING' || practicalStatus === 'NOT_STARTED')) ||
     writtenStatus === 'PENDING' ||
     writtenStatus === 'NOT_STARTED' ||
     (modAssessmentIds.length > 0 && quizScores.filter(q => q.attemptNumber > 0).length < modAssessmentIds.length);
@@ -745,30 +761,23 @@ export async function calculateTraineeCourseGrade(params: {
   let finalStatus: 'PASSED' | 'FAILED' | 'IN_PROGRESS' | 'NEEDS_REMEDIATION' | 'PENDING_GRADING' = 'IN_PROGRESS';
   let passed = false;
 
-  // Calculate formula:
-  // (Practical Component x practicalWeight%) + (Written Assessment Percentage x moduleQuizWeight%) + (Attendance x attendanceWeight%)
-  const practicalPoints = allPracticalPassed ? practicalContribution : 0.0;
-  const writtenPoints = allWrittenPassed ? writtenContribution : 0.0;
-  const attendancePoints = attendanceContribution || 0.0;
+  // Calculate weighted total cleanly (showing real earned points even when pending or needing quiz retake)
+  const practicalPoints = isFullModular ? 0.0 : (provisionalPracticalPoints ?? practicalContribution ?? 0.0);
+  const writtenPoints = provisionalWrittenPoints ?? 0.0;
+  const attendancePoints = isFullModular ? 0.0 : (attendanceContribution || 0.0);
   overallScore = Number((practicalPoints + writtenPoints + attendancePoints).toFixed(1));
 
   if (hasPending) {
     finalStatus = 'IN_PROGRESS';
     passed = false;
   } else {
-    // Part 1.4: All requirements must be satisfied to pass!
-    // Example A: Written below 70% -> FAIL / NOT YET QUALIFIED even if final score >= 70% (e.g. 87%)
-    // Example B: Practical incomplete -> NOT YET QUALIFIED / NEEDS_REMEDIATION
-    // Example C: All passed -> PASS
     if (allPracticalPassed && allWrittenPassed && overallScore >= policy.passingGrade && attendancePassed) {
       finalStatus = 'PASSED';
       passed = true;
-    } else if (!allWrittenPassed && (writtenScore !== null && writtenScore < 70)) {
-      // Example A: Written exam below 70%
+    } else if (!allWrittenPassed && writtenScore !== null && writtenScore < 70) {
       finalStatus = 'FAILED';
       passed = false;
-    } else if (!allPracticalPassed) {
-      // Example B: Practical incomplete or failed attempt
+    } else if (!allWrittenPassed || !allPracticalPassed) {
       finalStatus = 'NEEDS_REMEDIATION';
       passed = false;
     } else if (!attendancePassed) {
@@ -783,13 +792,15 @@ export async function calculateTraineeCourseGrade(params: {
   let statusRemarks = '';
   if (passed) {
     statusRemarks = isFullModular
-      ? `PASSED (Full Modular Course): All modular written assessments passed (${writtenScore}%). Final Grade: ${overallScore}%.`
+      ? `PASSED (Full Modular Course): All modular quizzes passed (${writtenScore}%). Final Grade: ${overallScore}%.`
       : `PASSED: All practical competencies certified (${practicalContribution.toFixed(1)} pts) and written assessment passed (${writtenScore}%). Final Grade: ${overallScore}%.`;
   } else if (!allWrittenPassed && (writtenScore !== null && writtenScore < 70)) {
-    statusRemarks = `FAIL / NOT YET QUALIFIED: Written examination score (${writtenScore}%) is below the mandatory 70% passing threshold, despite practical performance (Calculated: ${overallScore}%).`;
-  } else if (!allPracticalPassed) {
+    statusRemarks = isFullModular
+      ? `FAIL / NOT YET QUALIFIED: Modular quiz average (${writtenScore}%) is below the mandatory 70% passing threshold.`
+      : `FAIL / NOT YET QUALIFIED: Written examination score (${writtenScore}%) is below the mandatory 70% passing threshold, despite practical performance (Calculated: ${overallScore}%).`;
+  } else if (!isFullModular && !allPracticalPassed) {
     statusRemarks = `NOT YET QUALIFIED: Practical maritime exercises incomplete or pending successful retake. Trainee must demonstrate all required practical competencies.`;
-  } else if (!attendancePassed) {
+  } else if (!isFullModular && !attendancePassed) {
     statusRemarks = `FAIL: Attendance quorum (${attendancePct}%) does not satisfy minimum requirement of ${policy.minAttendancePct}%.`;
   } else {
     statusRemarks = mandatoryRemarks.join(' ') || 'Training requirements in progress.';
@@ -840,8 +851,8 @@ export async function calculateTraineeCourseGrade(params: {
       course_id: courseId,
       enrollment_id: enr.id,
       final_score: overallScore,
-      attendance_score: attendanceScore,
-      practical_score: practicalScore,
+      attendance_score: isFullModular ? null : attendanceScore,
+      practical_score: isFullModular ? null : practicalScore,
       module_score: writtenScore,
       policy_id: policy.id !== 'default-policy' ? policy.id : null,
       grade: finalStatus,
