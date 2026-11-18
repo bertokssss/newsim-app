@@ -242,34 +242,65 @@ export default function SchedulesClient() {
                 </h3>
 
                 <div className="mt-4 grid grid-cols-2 gap-2 text-xs font-mono">
-                  <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200/50 dark:border-slate-800 flex flex-col justify-between">
-                    <div>
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-[10px] text-slate-400 uppercase font-bold">Schedule Period</span>
-                        <span className="text-[9px] px-1.5 py-0.5 rounded font-mono font-bold bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20">
-                          {s.totalDays || 1} Day{(s.totalDays || 1) > 1 ? 's' : ''}
-                        </span>
-                      </div>
-                      <div className="space-y-1">
-                        <div>
-                          <span className="text-[9px] text-slate-400 uppercase block font-semibold">Date Started</span>
-                          <div className="font-bold text-slate-900 dark:text-[#F8FAFC] text-[11px] leading-tight">
-                            {s.startDate || s.date}
+                  {s.isFullModular ? (
+                    <div className="p-2.5 rounded-xl bg-indigo-50/60 dark:bg-indigo-950/30 border border-indigo-200/60 dark:border-indigo-800/60 flex flex-col justify-between">
+                      <div>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="text-[10px] text-indigo-600 dark:text-indigo-400 uppercase font-bold">Modular Window</span>
+                          <span className="text-[9px] px-1.5 py-0.5 rounded font-mono font-bold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20">
+                            Max {s.theoryDays || 3} Days
+                          </span>
+                        </div>
+                        <div className="space-y-1">
+                          <div>
+                            <span className="text-[9px] text-slate-400 uppercase block font-semibold">Delivery Mode</span>
+                            <div className="font-bold text-slate-900 dark:text-[#F8FAFC] text-[11px] leading-tight">
+                              Full Modular / In-House
+                            </div>
+                          </div>
+                          <div>
+                            <span className="text-[9px] text-slate-400 uppercase block font-semibold">Practical Date</span>
+                            <div className="font-bold text-indigo-600 dark:text-indigo-400 text-[11px] leading-tight">
+                              No Practical Date Required
+                            </div>
                           </div>
                         </div>
-                        <div>
-                          <span className="text-[9px] text-slate-400 uppercase block font-semibold">Date End</span>
-                          <div className="font-bold text-sky-600 dark:text-sky-400 text-[11px] leading-tight">
-                            {s.endDate || s.date}
+                      </div>
+                      <div className="pt-1.5 mt-1 border-t border-indigo-200/50 dark:border-indigo-800/50 text-[10px] text-slate-500 flex items-center justify-between">
+                        <span>Role:</span>
+                        <span className="font-semibold text-slate-700 dark:text-slate-300">Academic Record Review</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200/50 dark:border-slate-800 flex flex-col justify-between">
+                      <div>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="text-[10px] text-slate-400 uppercase font-bold">Schedule Period</span>
+                          <span className="text-[9px] px-1.5 py-0.5 rounded font-mono font-bold bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20">
+                            {s.totalDays || 1} Day{(s.totalDays || 1) > 1 ? 's' : ''}
+                          </span>
+                        </div>
+                        <div className="space-y-1">
+                          <div>
+                            <span className="text-[9px] text-slate-400 uppercase block font-semibold">Date Started</span>
+                            <div className="font-bold text-slate-900 dark:text-[#F8FAFC] text-[11px] leading-tight">
+                              {s.startDate || s.date}
+                            </div>
+                          </div>
+                          <div>
+                            <span className="text-[9px] text-slate-400 uppercase block font-semibold">Date End</span>
+                            <div className="font-bold text-sky-600 dark:text-sky-400 text-[11px] leading-tight">
+                              {s.endDate || s.date}
+                            </div>
                           </div>
                         </div>
                       </div>
+                      <div className="pt-1.5 mt-1 border-t border-slate-200/50 dark:border-slate-800 text-[10px] text-slate-500 flex items-center justify-between">
+                        <span>Daily:</span>
+                        <span className="font-semibold text-slate-700 dark:text-slate-300">{s.startTime} - {s.endTime}</span>
+                      </div>
                     </div>
-                    <div className="pt-1.5 mt-1 border-t border-slate-200/50 dark:border-slate-800 text-[10px] text-slate-500 flex items-center justify-between">
-                      <span>Daily:</span>
-                      <span className="font-semibold text-slate-700 dark:text-slate-300">{s.startTime} - {s.endTime}</span>
-                    </div>
-                  </div>
+                  )}
 
                   <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200/50 dark:border-slate-800 flex flex-col justify-between">
                     <div>
@@ -280,7 +311,7 @@ export default function SchedulesClient() {
                         </span>
                       </div>
                       <div className="font-extrabold text-slate-900 dark:text-[#F8FAFC] text-base mt-0.5">
-                        {s.enrolledCount || 24} / {s.capacity}
+                        {s.enrolledCount ?? 0} / {s.capacity}
                       </div>
                       <div className="text-[10px] text-slate-400 mt-0.5">Trainees Enrolled</div>
                     </div>
@@ -295,7 +326,7 @@ export default function SchedulesClient() {
 
                 <div className="mt-3 p-3 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200/50 dark:border-slate-800 text-xs font-mono space-y-1">
                   <div className="flex justify-between">
-                    <span className="text-slate-400">Room / Simulator:</span>
+                    <span className="text-slate-400">{s.isFullModular ? 'Training Venue:' : 'Room / Simulator:'}</span>
                     <span className="font-bold text-slate-900 dark:text-[#F8FAFC]">{s.room}</span>
                   </div>
                   <div className="flex justify-between">

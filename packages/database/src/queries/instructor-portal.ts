@@ -2049,32 +2049,46 @@ export async function getInstructorProgressData(
  */
 export async function getInstructorSchedulesList(profileId?: string) {
   const resolvedId = await resolveInstructorProfileId(profileId);
+  const assignedCourseIds = await getInstructorCourseIds(resolvedId);
 
-  const { data: schedulesData, error } = await supabaseAdmin
-    .from('schedules')
-    .select('*, courses(id, code, name, category, capacity, duration_hours, theory_days, practical_days), training_centers(name), instructors(profiles(first_name, last_name, avatar_url))')
-    .or(`instructor_id.eq.${resolvedId},substitute_instructor_id.eq.${resolvedId}`)
-    .neq('status', 'CANCELLED')
-    .order('start_at', { ascending: true });
+  const [{ data: schedulesData, error }, { data: assignedCoursesData }] = await Promise.all([
+    supabaseAdmin
+      .from('schedules')
+      .select('*, courses(id, code, name, category, capacity, duration_hours, theory_days, practical_days), training_centers(name), instructors(profiles(first_name, last_name, avatar_url))')
+      .or(`instructor_id.eq.${resolvedId},substitute_instructor_id.eq.${resolvedId}`)
+      .neq('status', 'CANCELLED')
+      .order('start_at', { ascending: true }),
+    assignedCourseIds.length > 0
+      ? supabaseAdmin
+          .from('courses')
+          .select('id, code, name, category, capacity, duration_hours, theory_days, practical_days, training_centers(name)')
+          .in('id', assignedCourseIds)
+      : Promise.resolve({ data: [] as any[] }),
+  ]);
 
   if (error) throw error;
 
-  // Full modular courses have no practical training dates or schedules
-  let schedules = (schedulesData || []).filter(
+  // Full modular courses have no practical training dates in schedules table
+  const schedules = (schedulesData || []).filter(
     (s: any) => !isInHouseModularCourse(s.courses?.category, s.courses?.practical_days)
   );
-  if (schedules.length === 0) {
-    return [];
-  }
+  const modularCourses = (assignedCoursesData || []).filter((c: any) =>
+    isInHouseModularCourse(c.category, c.practical_days)
+  );
 
   // Calculate real enrolled trainees per course
-  const courseIds = Array.from(new Set(schedules.map((s: any) => s.course_id).filter(Boolean)));
+  const allCourseIds = Array.from(
+    new Set([
+      ...schedules.map((s: any) => s.course_id),
+      ...modularCourses.map((c: any) => c.id),
+    ].filter(Boolean))
+  );
   const countMap = new Map<string, number>();
-  if (courseIds.length > 0) {
+  if (allCourseIds.length > 0) {
     const { data: enrs } = await supabaseAdmin
       .from('enrollments')
       .select('course_id')
-      .in('course_id', courseIds)
+      .in('course_id', allCourseIds)
       .not('status', 'in', '("CANCELLED","REJECTED")');
 
     (enrs || []).forEach((e: any) => {
@@ -2084,7 +2098,43 @@ export async function getInstructorSchedulesList(profileId?: string) {
     });
   }
 
-  return schedules.map((s: any) => {
+  const modularItems = modularCourses.map((c: any) => {
+    const effectiveCap = Math.min(c.capacity || 24, 24);
+    const actualEnrolled = countMap.get(c.id) || 0;
+    const theoryDays = Math.min(3, Math.max(1, Number(c.theory_days || 3)));
+    const centerRel = Array.isArray(c.training_centers) ? c.training_centers[0] : c.training_centers;
+
+    return {
+      id: `modular:${c.id}`,
+      sessionCode: `${c.code || 'MOD'}-MODULAR`,
+      courseId: c.id,
+      courseCode: c.code || 'MOD',
+      courseTitle: c.name || 'Full Modular Course',
+      isFullModular: true,
+      deliveryMode: 'FULL_MODULAR',
+      instructorName: 'Academic Record Reviewer',
+      instructorAvatarUrl: null,
+      isSubstitute: false,
+      substituteInstructorId: null,
+      room: 'Online Modular Portal (No Physical Room)',
+      centerName: centerRel?.name || 'NEWSIM Online Modular LMS',
+      date: '',
+      startDate: '',
+      endDate: '',
+      durationHours: Number(c.duration_hours || 24),
+      durationDays: theoryDays,
+      theoryDays,
+      practicalDays: 0,
+      totalDays: theoryDays,
+      startTime: 'Self-Paced (Max 3 Days)',
+      endTime: 'No Practical Date',
+      capacity: effectiveCap,
+      enrolledCount: Math.min(actualEnrolled, effectiveCap),
+      status: 'SCHEDULED',
+    };
+  });
+
+  const practicalItems = schedules.map((s: any) => {
     const startDate = s.start_at ? new Date(s.start_at) : new Date();
     const endDate = s.end_at ? new Date(s.end_at) : new Date(startDate.getTime() + 4 * 3600000);
 
@@ -2130,6 +2180,8 @@ export async function getInstructorSchedulesList(profileId?: string) {
       courseId: s.course_id,
       courseCode: s.courses?.code || 'STCW',
       courseTitle: s.courses?.name || 'Maritime Simulation Course',
+      isFullModular: false,
+      deliveryMode: 'MODULAR_AND_PRACTICAL',
       instructorName,
       instructorAvatarUrl: instructorProfile?.avatar_url || null,
       isSubstitute,
@@ -2151,6 +2203,8 @@ export async function getInstructorSchedulesList(profileId?: string) {
       status: s.status || 'SCHEDULED',
     };
   });
+
+  return [...modularItems, ...practicalItems];
 }
 
 /**
