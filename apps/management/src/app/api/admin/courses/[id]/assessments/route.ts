@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@newsim/database';
-import { ASSESSMENT_SELECT, formatAssessment, isAdminContext, requireAdmin, writeAdminAudit } from '@/lib/admin-api';
+import {
+  ASSESSMENT_SELECT,
+  formatAssessment,
+  isAdminContext,
+  requireAdmin,
+  resolveAssessmentModuleId,
+  writeAdminAudit,
+} from '@/lib/admin-api';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,17 +39,24 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   try {
     const body = await request.json();
-    const { title, type, passingScore, durationMinutes, totalPoints, description } = body;
+    const { title, type, passingScore, durationMinutes, description, moduleId } = body;
 
     if (!title) {
       return NextResponse.json({ success: false, error: 'Assessment title is required' }, { status: 400 });
+    }
+
+    const resolvedModule = await resolveAssessmentModuleId(id, moduleId);
+    if (resolvedModule.error) {
+      return NextResponse.json({ success: false, error: resolvedModule.error }, { status: 400 });
     }
 
     const { data, error } = await supabaseAdmin
       .from('assessments')
       .insert({
         title: String(title).trim(),
+        description: description ? String(description).trim() : null,
         course_id: id,
+        module_id: resolvedModule.moduleId,
         assessment_type: (type || 'WRITTEN').toUpperCase(),
         passing_score: !isNaN(Number(passingScore)) ? Number(passingScore) : 75,
         duration_minutes: parseInt(durationMinutes, 10) || 60,

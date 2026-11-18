@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Award,
@@ -19,16 +20,17 @@ const easeCurve: [number, number, number, number] = [0.22, 1, 0.36, 1];
 
 export default function AssessmentsClient() {
   const [assessments, setAssessments] = useState<any[]>([]);
+  const [courses, setCourses] = useState<Array<{ id: string; code: string; title: string }>>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('ALL');
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [formData, setFormData] = useState({
     title: '',
-    courseId: 'crs-001',
-    type: 'PRACTICAL',
+    courseId: '',
+    type: 'WRITTEN',
     totalPoints: '100',
-    passingScore: '80',
+    passingScore: '75',
     durationMinutes: '60',
   });
 
@@ -55,8 +57,26 @@ export default function AssessmentsClient() {
     fetchAssessments();
   }, [search, typeFilter]);
 
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/admin/courses?limit=200');
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          setCourses(json.data);
+          setFormData((prev) =>
+            prev.courseId ? prev : { ...prev, courseId: json.data[0]?.id || '' }
+          );
+        }
+      } catch (err) {
+        console.error('Failed to load courses for assessments:', err);
+      }
+    })();
+  }, []);
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!formData.courseId) return;
     try {
       const res = await fetch('/api/admin/assessments', {
         method: 'POST',
@@ -66,7 +86,14 @@ export default function AssessmentsClient() {
       const json = await res.json();
       if (json.success) {
         setCreateModalOpen(false);
-        setFormData({ title: '', courseId: 'crs-001', type: 'PRACTICAL', totalPoints: '100', passingScore: '80', durationMinutes: '60' });
+        setFormData({
+          title: '',
+          courseId: courses[0]?.id || '',
+          type: 'WRITTEN',
+          totalPoints: '100',
+          passingScore: '75',
+          durationMinutes: '60',
+        });
         fetchAssessments();
       }
     } catch (err) {
@@ -214,8 +241,18 @@ export default function AssessmentsClient() {
               </div>
 
               <div className="mt-5 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs font-mono">
-                <span className="text-slate-400">Avg: {a.averageScore} pts</span>
-                <span className="text-emerald-600 dark:text-emerald-400 font-bold">Standard STCW Format</span>
+                <span className="text-slate-400">Questions: {a.questionsCount ?? 0}</span>
+                {a.courseId ? (
+                  <Link
+                    href={`/admin/courses/${a.courseId}`}
+                    className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 hover:underline font-bold"
+                  >
+                    <span>Manage Questions</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </Link>
+                ) : (
+                  <span className="text-emerald-600 dark:text-emerald-400 font-bold">Standard STCW Format</span>
+                )}
               </div>
             </motion.div>
           ))
@@ -236,6 +273,23 @@ export default function AssessmentsClient() {
               </div>
 
               <form onSubmit={handleCreate} className="space-y-3 text-xs">
+                <div>
+                  <label className="block text-slate-600 dark:text-[#CBD5E1] font-mono uppercase text-[10px] mb-1">Course</label>
+                  <select
+                    required
+                    value={formData.courseId}
+                    onChange={(e) => setFormData({ ...formData, courseId: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-[#F8FAFC] outline-none"
+                  >
+                    <option value="">Select a course...</option>
+                    {courses.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.code} — {c.title}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
                 <div>
                   <label className="block text-slate-600 dark:text-[#CBD5E1] font-mono uppercase text-[10px] mb-1">Assessment Title</label>
                   <input

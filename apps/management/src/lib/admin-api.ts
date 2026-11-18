@@ -695,8 +695,32 @@ export function formatCertificate(row: any) {
   };
 }
 
+export async function resolveAssessmentModuleId(
+  courseId: string,
+  rawModuleId: unknown
+): Promise<{ provided: boolean; moduleId: string | null; error?: string }> {
+  if (rawModuleId === undefined) {
+    return { provided: false, moduleId: null };
+  }
+  const trimmed = typeof rawModuleId === 'string' ? rawModuleId.trim() : rawModuleId;
+  if (!trimmed || trimmed === 'POST_TEST') {
+    return { provided: true, moduleId: null };
+  }
+  const { data: modRow, error } = await supabaseAdmin
+    .from('course_modules')
+    .select('id')
+    .eq('id', String(trimmed))
+    .eq('course_id', courseId)
+    .maybeSingle();
+  if (error || !modRow) {
+    return { provided: true, moduleId: null, error: 'Selected curriculum module does not belong to this course.' };
+  }
+  return { provided: true, moduleId: modRow.id };
+}
+
 export function formatAssessment(row: any, stats?: { submissions?: number; passed?: number; failed?: number; average?: number }) {
   const course = unwrap(row.courses);
+  const mod = unwrap(row.course_modules);
   const questions = unwrap(row.assessment_questions) || row.assessment_questions;
   const questionsList = Array.isArray(questions) ? questions : [];
   const calculatedTotalPoints = questionsList.reduce((sum: number, q: any) => sum + (Number(q.points) || 1), 0);
@@ -705,9 +729,13 @@ export function formatAssessment(row: any, stats?: { submissions?: number; passe
     id: row.id,
     code: `ASM-${(course?.code || 'GEN').toString().slice(0, 8)}-${String(row.id).slice(0, 4).toUpperCase()}`,
     title: row.title,
+    description: row.description || '',
     courseId: row.course_id,
     courseCode: course?.code || '',
     courseTitle: course?.name || '',
+    moduleId: row.module_id || null,
+    moduleTitle: mod?.title || null,
+    moduleSortOrder: mod?.sort_order ?? null,
     type: (row.assessment_type || 'WRITTEN').toString().toUpperCase(),
     totalPoints: calculatedTotalPoints > 0 ? calculatedTotalPoints : (Number(row.total_points) || 100),
     passingScore: passingScoreNum,
@@ -795,7 +823,7 @@ export const PAYMENT_SELECT =
   '*, trainees(profiles(first_name, last_name, email, phone, avatar_url)), enrollments(id, status, training_center_id, courses(code, name))';
 export const CERTIFICATE_SELECT =
   '*, trainees(profiles(first_name, last_name, email, avatar_url)), courses(code, name, training_center_id)';
-export const ASSESSMENT_SELECT = '*, courses(code, name, training_center_id), assessment_questions(id, points)';
+export const ASSESSMENT_SELECT = '*, courses(code, name, training_center_id), course_modules(id, title, sort_order), assessment_questions(id, points)';
 export const INSTRUCTOR_SELECT = '*, profiles!inner(*), training_centers(name)';
 
 export function formatInstructor(row: any) {

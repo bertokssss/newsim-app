@@ -3230,13 +3230,19 @@ export async function syncTraineeDailyModules(
   const completedModuleIds = await getReadModuleIds(resolvedId, [courseId]);
 
   // 8. Fetch assessments and attempts for this course
-  const { data: assessments } = await supabaseAdmin
+  const { data: rawCourseAssessments } = await supabaseAdmin
     .from('assessments')
-    .select('id, module_id, title, passing_score')
-    .eq('course_id', courseId);
+    .select('id, module_id, title, passing_score, assessment_type, assessment_questions(id)')
+    .eq('course_id', courseId)
+    .neq('status', 'ARCHIVED');
+
+  const assessments = (rawCourseAssessments || []).filter((a: any) => {
+    const qCount = Array.isArray(a.assessment_questions) ? a.assessment_questions.length : 0;
+    return qCount > 0;
+  });
 
   const asmMap = new Map<string, any>();
-  (assessments || []).forEach((a: any) => {
+  assessments.forEach((a: any) => {
     if (a.module_id) asmMap.set(a.module_id, a);
   });
 
@@ -3552,6 +3558,7 @@ export async function getTraineeLearningMaterials(
       assessment_type,
       passing_score,
       duration_minutes,
+      created_at,
       assessment_questions (
         id,
         question_text,
@@ -3566,7 +3573,8 @@ export async function getTraineeLearningMaterials(
         )
       )
     `)
-    .eq('course_id', targetCourseId);
+    .eq('course_id', targetCourseId)
+    .neq('status', 'ARCHIVED');
 
   // Fetch attempts for this trainee on these assessments
   const asmIds = (courseAssessments || []).map((a: any) => a.id);
@@ -3595,17 +3603,48 @@ export async function getTraineeLearningMaterials(
     });
   }
 
-  // Find course post-test (where module_id is null)
-  const rawPostTest = (courseAssessments || []).find((a: any) => !a.module_id);
+  const isQuizAssessment = (a: any) =>
+    (Array.isArray(a.assessment_questions) && a.assessment_questions.length > 0) ||
+    !['PRACTICAL', 'SIMULATOR', 'ORAL'].includes(String(a.assessment_type || 'WRITTEN').toUpperCase());
+
+  const mapLearningQuestion = (q: any, revealCorrect: boolean) => {
+    const qType = String(q.question_type || 'MULTIPLE_CHOICE').toUpperCase();
+    const sortedChoices = ((q.assessment_choices || []) as any[]).sort(
+      (c1, c2) => (c1.sort_order || 0) - (c2.sort_order || 0)
+    );
+    return {
+      id: q.id,
+      questionText: q.question_text,
+      questionType: qType,
+      points: q.points || 1,
+      choices:
+        qType === 'IDENTIFICATION' && !revealCorrect
+          ? []
+          : sortedChoices.map((c: any) => ({
+              id: c.id,
+              choiceText: c.choice_text,
+              ...(revealCorrect ? { isCorrect: Boolean(c.is_correct) } : {}),
+            })),
+    };
+  };
+
+  // Find course post-test (where module_id is null), preferring the newest post-test with configured questions
+  const postTestCandidates = (courseAssessments || [])
+    .filter((a: any) => !a.module_id && isQuizAssessment(a))
+    .sort((a: any, b: any) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+  const rawPostTest =
+    postTestCandidates.find((a: any) => attemptsMap.has(a.id) && Array.isArray(a.assessment_questions) && a.assessment_questions.length > 0) ||
+    postTestCandidates.find((a: any) => Array.isArray(a.assessment_questions) && a.assessment_questions.length > 0) ||
+    postTestCandidates[0];
   const postTestAttempt = rawPostTest ? attemptsMap.get(rawPostTest.id) : null;
   const rawPostTestPass = rawPostTest && rawPostTest.passing_score != null && !isNaN(Number(rawPostTest.passing_score))
     ? Number(rawPostTest.passing_score)
     : 75;
   // Official written passing threshold: 75% per STCW requirements
   const postTestPassingScore = Math.max(75, rawPostTestPass);
-  const postTestQuestionsCount = ((rawPostTest?.assessment_questions || []) as any[]).length || 10;
+  const postTestQuestionsCount = ((rawPostTest?.assessment_questions || []) as any[]).length;
   const postTestCorrectCount = postTestAttempt
-    ? Math.round(((Number(postTestAttempt.score) || 0) * postTestQuestionsCount) / 100)
+    ? (postTestQuestionsCount > 0 ? Math.round(((Number(postTestAttempt.score) || 0) * postTestQuestionsCount) / 100) : 0)
     : null;
   const isPostTestPassedFlag = Boolean(
     postTestAttempt && (postTestAttempt.status === 'PASSED' || Number(postTestAttempt.score) >= postTestPassingScore)
@@ -3634,29 +3673,23 @@ export async function getTraineeLearningMaterials(
     lockReason: null as string | null,
     questions: ((rawPostTest.assessment_questions || []) as any[])
       .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
-      .map((q: any) => ({
-        id: q.id,
-        questionText: q.question_text,
-        points: q.points || 1,
-        choices: ((q.assessment_choices || []) as any[])
-          .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
-          .map((c: any) => ({
-            id: c.id,
-            choiceText: c.choice_text,
-            ...(postTestAttempt ? { isCorrect: Boolean(c.is_correct) } : {}),
-          }))
-      }))
+      .map((q: any) => mapLearningQuestion(q, Boolean(postTestAttempt)))
   } : null;
 
   // Build module assessment lookup
   const moduleAsmMap = new Map<string, any>();
-  (courseAssessments || []).filter((a: any) => !!a.module_id).forEach((a: any) => {
+  (courseAssessments || []).filter((a: any) => !!a.module_id && isQuizAssessment(a)).forEach((a: any) => {
+    const prevMapped = moduleAsmMap.get(a.module_id);
+    const hasQuestions = Array.isArray(a.assessment_questions) && a.assessment_questions.length > 0;
+    if (prevMapped && prevMapped.questionsCount > 0 && !hasQuestions) {
+      return;
+    }
     const att = attemptsMap.get(a.id);
     const rawPass = a.passing_score != null && !isNaN(Number(a.passing_score)) ? Number(a.passing_score) : 75;
     // Written assessment 75% threshold
     const passThreshold = Math.max(75, rawPass);
-    const modQCount = ((a.assessment_questions || []) as any[]).length || 10;
-    const modCorrectCount = att ? Math.round(((Number(att.score) || 0) * modQCount) / 100) : null;
+    const modQCount = ((a.assessment_questions || []) as any[]).length;
+    const modCorrectCount = att ? (modQCount > 0 ? Math.round(((Number(att.score) || 0) * modQCount) / 100) : 0) : null;
     const modIsPassed = Boolean(att && (att.status === 'PASSED' || Number(att.score) >= passThreshold));
     moduleAsmMap.set(a.module_id, {
       id: a.id,
@@ -3676,18 +3709,7 @@ export async function getTraineeLearningMaterials(
       submittedAt: att?.submitted_at ?? null,
       questions: ((a.assessment_questions || []) as any[])
         .sort((q1, q2) => (q1.sort_order || 0) - (q2.sort_order || 0))
-        .map((q: any) => ({
-          id: q.id,
-          questionText: q.question_text,
-          points: q.points || 1,
-          choices: ((q.assessment_choices || []) as any[])
-            .sort((c1, c2) => (c1.sort_order || 0) - (c2.sort_order || 0))
-            .map((c: any) => ({
-              id: c.id,
-              choiceText: c.choice_text,
-              ...(att ? { isCorrect: Boolean(c.is_correct) } : {}),
-            }))
-        }))
+        .map((q: any) => mapLearningQuestion(q, Boolean(att)))
     });
   });
 
@@ -4153,6 +4175,7 @@ export async function getTraineeAssessmentsList(traineeId: string, search?: stri
       assessment_questions (
         id,
         question_text,
+        question_type,
         points,
         sort_order,
         assessment_choices (
@@ -4167,7 +4190,7 @@ export async function getTraineeAssessmentsList(traineeId: string, search?: stri
   if (courseIds.length === 0) {
     return [];
   }
-  query = query.in('course_id', courseIds);
+  query = query.in('course_id', courseIds).neq('status', 'ARCHIVED');
 
   const { data, error } = await query;
   if (error) throw error;
@@ -4217,28 +4240,49 @@ export async function getTraineeAssessmentsList(traineeId: string, search?: stri
   });
 
   const attemptIds = attempts.map((a: any) => a.id).filter(Boolean);
-  const answersByAttempt = new Map<string, Record<string, string>>();
+  const answersByAttempt = new Map<string, Record<string, { selectedChoiceId: string | null; answerText: string | null }>>();
   if (attemptIds.length > 0) {
     const { data: pastAnswers } = await supabaseAdmin
       .from('assessment_answers')
-      .select('attempt_id, question_id, selected_choice_id')
+      .select('attempt_id, question_id, selected_choice_id, answer_text')
       .in('attempt_id', attemptIds);
     (pastAnswers || []).forEach((ans: any) => {
       if (!answersByAttempt.has(ans.attempt_id)) {
         answersByAttempt.set(ans.attempt_id, {});
       }
-      answersByAttempt.get(ans.attempt_id)![ans.question_id] = ans.selected_choice_id;
+      answersByAttempt.get(ans.attempt_id)![ans.question_id] = {
+        selectedChoiceId: ans.selected_choice_id || null,
+        answerText: ans.answer_text || null,
+      };
     });
   }
 
-  let assessments = (data || []).map((a: any) => {
+  let assessments = (data || [])
+    .filter((a: any) => {
+      const att = attemptsMap.get(a.id);
+      const qCount = Array.isArray(a.assessment_questions) ? a.assessment_questions.length : 0;
+      const typeUpper = String(a.assessment_type || 'WRITTEN').toUpperCase();
+      if (['PRACTICAL', 'SIMULATOR', 'ORAL'].includes(typeUpper) && qCount === 0 && !att) {
+        return false;
+      }
+      return true;
+    })
+    .map((a: any) => {
     const att = attemptsMap.get(a.id);
     const courseRel = Array.isArray(a.courses) ? a.courses[0] : a.courses;
     const isFullModularCourse = isInHouseModularCourse(courseRel?.category, courseRel?.practical_days);
     const passingThreshold = a.passing_score != null && !isNaN(Number(a.passing_score)) ? Number(a.passing_score) : 75;
     const isPassed = att ? (att.status === 'PASSED' || att.passed === true || (Number(att.score) >= passingThreshold)) : false;
     const isAttempted = Boolean(att);
-    const userAnswers = att ? (answersByAttempt.get(att.id) || {}) : {};
+    const rawAttemptAnswers = att ? (answersByAttempt.get(att.id) || {}) : {};
+    const userAnswers: Record<string, string> = {};
+    ((a.assessment_questions || []) as any[]).forEach((q: any) => {
+      const rec = rawAttemptAnswers[q.id];
+      if (!rec) return;
+      const qType = String(q.question_type || 'MULTIPLE_CHOICE').toUpperCase();
+      const val = qType === 'IDENTIFICATION' ? (rec.answerText ?? rec.selectedChoiceId) : rec.selectedChoiceId;
+      if (val) userAnswers[q.id] = val;
+    });
     const attemptsUsed = attemptCountMap.get(a.id) || 0;
 
     let status = 'NOT_STARTED';
@@ -4281,19 +4325,25 @@ export async function getTraineeAssessmentsList(traineeId: string, search?: stri
     const rawQuestions = ((a.assessment_questions || []) as any[])
       .sort((q1, q2) => (q1.sort_order || 0) - (q2.sort_order || 0))
       .map((q: any) => {
+        const qType = String(q.question_type || 'MULTIPLE_CHOICE').toUpperCase();
         const correctChoice = (q.assessment_choices || []).find((c: any) => c.is_correct);
         return {
           id: q.id,
           question: q.question_text,
+          questionType: qType,
           points: q.points || 1,
           correctChoiceId: isAttempted ? (correctChoice?.id || null) : null,
-          options: ((q.assessment_choices || []) as any[])
-            .sort((c1, c2) => (c1.sort_order || 0) - (c2.sort_order || 0))
-            .map((c: any) => ({
-              id: c.id,
-              text: c.choice_text,
-              isCorrect: isAttempted ? Boolean(c.is_correct) : undefined,
-            }))
+          correctAnswerText: isAttempted ? (correctChoice?.choice_text || null) : null,
+          options:
+            qType === 'IDENTIFICATION'
+              ? []
+              : ((q.assessment_choices || []) as any[])
+                  .sort((c1, c2) => (c1.sort_order || 0) - (c2.sort_order || 0))
+                  .map((c: any) => ({
+                    id: c.id,
+                    text: c.choice_text,
+                    isCorrect: isAttempted ? Boolean(c.is_correct) : undefined,
+                  })),
         };
       });
 
@@ -4425,13 +4475,20 @@ export async function submitTraineeAssessment(
       // Also fetch past answers for review
       const { data: pastAnswers } = await supabaseAdmin
         .from('assessment_answers')
-        .select('question_id, selected_choice_id, is_correct, points_earned')
+        .select('question_id, selected_choice_id, answer_text, is_correct, points_earned, assessment_questions(question_type)')
         .eq('attempt_id', prev.id);
 
       const answersMap: Record<string, string> = {};
       (pastAnswers || []).forEach((pa: any) => {
-        if (pa.question_id && pa.selected_choice_id) {
-          answersMap[pa.question_id] = pa.selected_choice_id;
+        if (!pa.question_id) return;
+        const qRel = Array.isArray(pa.assessment_questions) ? pa.assessment_questions[0] : pa.assessment_questions;
+        const qType = String(qRel?.question_type || 'MULTIPLE_CHOICE').toUpperCase();
+        const val =
+          qType === 'IDENTIFICATION'
+            ? pa.answer_text || pa.selected_choice_id
+            : pa.selected_choice_id || pa.answer_text;
+        if (val) {
+          answersMap[pa.question_id] = val;
         }
       });
 
@@ -4497,6 +4554,7 @@ export async function submitTraineeAssessment(
     .select(`
       id,
       question_text,
+      question_type,
       points,
       sort_order,
       assessment_choices (
@@ -4509,45 +4567,75 @@ export async function submitTraineeAssessment(
     .eq('assessment_id', assessmentId)
     .order('sort_order', { ascending: true });
 
-  if (qs && qs.length > 0) {
-    qs.forEach((q: any) => {
-      const pts = Number(q.points) || 1;
-      totalPoints += pts;
-      const selectedChoiceId = answers && typeof answers === 'object' ? answers[q.id] : null;
-      const picked = (q.assessment_choices || []).find((c: any) => c.id === selectedChoiceId);
-      const isCorrect = Boolean(picked?.is_correct);
-      if (isCorrect) {
-        earnedPoints += pts;
-        correctCount += 1;
-      }
-      const pointsEarned = isCorrect ? pts : 0;
-      const correctChoice = (q.assessment_choices || []).find((c: any) => c.is_correct);
-
-      questionResults.push({
-        questionId: q.id,
-        questionText: q.question_text,
-        selectedChoiceId,
-        selectedChoiceText: picked?.choice_text || null,
-        isCorrect,
-        pointsEarned,
-        pointsPossible: pts,
-        correctChoiceId: correctChoice?.id || null,
-        correctChoiceText: correctChoice?.choice_text || null,
-      });
-
-      if (selectedChoiceId) {
-        answersToInsert.push({
-          question_id: q.id,
-          selected_choice_id: selectedChoiceId,
-          answer_text: picked?.choice_text || null,
-          is_correct: isCorrect,
-          points_earned: pointsEarned,
-          answered_at: new Date().toISOString(),
-        });
-      }
-    });
-    score = totalPoints > 0 ? Math.round((earnedPoints / totalPoints) * 100) : 0;
+  if (!qs || qs.length === 0) {
+    throw new Error('This assessment has no questions configured yet.');
   }
+
+  qs.forEach((q: any) => {
+    const pts = Number(q.points) || 1;
+    totalPoints += pts;
+    const qType = String(q.question_type || 'MULTIPLE_CHOICE').toUpperCase();
+    const rawAns = answers && typeof answers === 'object' ? answers[q.id] : null;
+    const choicesList = (q.assessment_choices || []) as any[];
+    const correctChoice = choicesList.find((c: any) => c.is_correct);
+
+    let selectedChoiceId: string | null = null;
+    let selectedChoiceText: string | null = null;
+    let isCorrect = false;
+
+    if (qType === 'IDENTIFICATION') {
+      const matchedChoice = choicesList.find((c: any) => c.id === rawAns);
+      if (matchedChoice) {
+        selectedChoiceId = matchedChoice.id;
+        selectedChoiceText = matchedChoice.choice_text;
+        isCorrect = Boolean(matchedChoice.is_correct);
+      } else {
+        const submittedText = typeof rawAns === 'string' ? rawAns.trim() : '';
+        const expectedText = String(correctChoice?.choice_text || '').trim();
+        selectedChoiceText = submittedText || null;
+        isCorrect = Boolean(
+          submittedText && expectedText && submittedText.toLowerCase() === expectedText.toLowerCase()
+        );
+        selectedChoiceId = isCorrect && correctChoice?.id ? correctChoice.id : null;
+      }
+    } else {
+      selectedChoiceId = typeof rawAns === 'string' ? rawAns : null;
+      const picked = choicesList.find((c: any) => c.id === selectedChoiceId);
+      selectedChoiceText = picked?.choice_text || null;
+      isCorrect = Boolean(picked?.is_correct);
+    }
+
+    if (isCorrect) {
+      earnedPoints += pts;
+      correctCount += 1;
+    }
+    const pointsEarned = isCorrect ? pts : 0;
+
+    questionResults.push({
+      questionId: q.id,
+      questionText: q.question_text,
+      questionType: qType,
+      selectedChoiceId,
+      selectedChoiceText,
+      isCorrect,
+      pointsEarned,
+      pointsPossible: pts,
+      correctChoiceId: correctChoice?.id || null,
+      correctChoiceText: correctChoice?.choice_text || null,
+    });
+
+    if (selectedChoiceId || selectedChoiceText) {
+      answersToInsert.push({
+        question_id: q.id,
+        selected_choice_id: selectedChoiceId,
+        answer_text: selectedChoiceText,
+        is_correct: isCorrect,
+        points_earned: pointsEarned,
+        answered_at: new Date().toISOString(),
+      });
+    }
+  });
+  score = totalPoints > 0 ? Math.round((earnedPoints / totalPoints) * 100) : 0;
 
   const passingScore = assessment?.passing_score != null && !isNaN(Number(assessment.passing_score))
     ? Number(assessment.passing_score)

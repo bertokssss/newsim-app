@@ -70,7 +70,11 @@ interface AssessmentItem {
   id: string;
   code: string;
   title: string;
+  description?: string;
   type: string;
+  moduleId?: string | null;
+  moduleTitle?: string | null;
+  moduleSortOrder?: number | null;
   passingScore: number;
   durationMinutes: number;
   totalPoints?: number;
@@ -387,6 +391,7 @@ export default function CourseDetailsClient({ courseId }: { courseId: string }) 
   const [assessmentForm, setAssessmentForm] = useState({
     title: '',
     type: 'WRITTEN',
+    moduleId: '',
     passingScore: 75,
     durationMinutes: 60,
     description: '',
@@ -932,6 +937,7 @@ export default function CourseDetailsClient({ courseId }: { courseId: string }) 
         setAssessmentForm({
           title: '',
           type: 'WRITTEN',
+          moduleId: '',
           passingScore: 75,
           durationMinutes: 60,
           description: '',
@@ -2376,6 +2382,7 @@ export default function CourseDetailsClient({ courseId }: { courseId: string }) 
                 setAssessmentForm({
                   title: '',
                   type: 'WRITTEN',
+                  moduleId: '',
                   passingScore: 75,
                   durationMinutes: 60,
                   description: '',
@@ -2404,6 +2411,7 @@ export default function CourseDetailsClient({ courseId }: { courseId: string }) 
                   setAssessmentForm({
                     title: '',
                     type: 'WRITTEN',
+                    moduleId: '',
                     passingScore: 75,
                     durationMinutes: 60,
                     description: '',
@@ -2424,10 +2432,21 @@ export default function CourseDetailsClient({ courseId }: { courseId: string }) 
                   className="p-4 rounded-2xl bg-white dark:bg-[#0c1a2c] border border-slate-200/80 dark:border-slate-800 shadow-xs flex flex-col justify-between gap-3 hover:border-amber-500/40 transition-colors"
                 >
                   <div>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase bg-amber-500/15 text-amber-600 border border-amber-500/30">
-                        {asm.type || 'WRITTEN'}
-                      </span>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase bg-amber-500/15 text-amber-600 border border-amber-500/30">
+                          {asm.type || 'WRITTEN'}
+                        </span>
+                        <span
+                          className={`px-2 py-0.5 rounded text-[10px] font-mono font-semibold border ${
+                            asm.moduleId
+                              ? 'bg-sky-500/10 text-sky-700 dark:text-sky-300 border-sky-500/25'
+                              : 'bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 border-indigo-500/25'
+                          }`}
+                        >
+                          {asm.moduleId ? `Module: ${asm.moduleTitle || 'Assigned Module'}` : 'Course Post-Test'}
+                        </span>
+                      </div>
                       <span className="text-[10px] font-mono text-emerald-600 dark:text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded">
                         Passing: {asm.passingScore}%
                       </span>
@@ -2463,9 +2482,10 @@ export default function CourseDetailsClient({ courseId }: { courseId: string }) 
                           setAssessmentForm({
                             title: asm.title,
                             type: asm.type || 'WRITTEN',
+                            moduleId: asm.moduleId || '',
                             passingScore: asm.passingScore || 75,
                             durationMinutes: asm.durationMinutes || 60,
-                            description: '',
+                            description: asm.description || '',
                           });
                           setAssessmentModalOpen(true);
                         }}
@@ -2833,6 +2853,27 @@ export default function CourseDetailsClient({ courseId }: { courseId: string }) 
                     <option value="SIMULATOR">Simulator Scenario Assessment</option>
                     <option value="ORAL">Oral Examination / Interview</option>
                   </select>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-mono text-slate-500 uppercase mb-1 font-bold">
+                    Curriculum Placement (Module or Course Post-Test)
+                  </label>
+                  <select
+                    value={assessmentForm.moduleId}
+                    onChange={(e) => setAssessmentForm({ ...assessmentForm, moduleId: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white outline-none font-semibold"
+                  >
+                    <option value="">Course Post-Test (Unlocked after all modules)</option>
+                    {modules.map((mod, idx) => (
+                      <option key={mod.id} value={mod.id}>
+                        Module {idx + 1}: {mod.title}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    Assign to a specific module so it unlocks with that module&apos;s lesson, or leave as Course Post-Test.
+                  </p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">

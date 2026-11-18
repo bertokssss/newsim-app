@@ -326,7 +326,7 @@ export async function calculateTraineeCourseGrade(params: {
       .order('attempt_number', { ascending: false }),
     supabaseAdmin
       .from('assessments')
-      .select('id, title, module_id, passing_score, assessment_type')
+      .select('id, title, module_id, passing_score, assessment_type, assessment_questions(id)')
       .eq('course_id', courseId)
       .neq('status', 'ARCHIVED'),
   ]);
@@ -342,7 +342,10 @@ export async function calculateTraineeCourseGrade(params: {
       );
   const courseRubrics = isFullModular ? [] : courseRubricsRes.data;
   const allPracticalEvals = isFullModular ? [] : allPracticalEvalsRes.data;
-  const moduleAssessments = moduleAssessmentsRes.data;
+  const moduleAssessments = (moduleAssessmentsRes.data || []).filter((a: any) => {
+    const qCount = Array.isArray(a.assessment_questions) ? a.assessment_questions.length : 0;
+    return qCount > 0;
+  });
 
   // 2. Attendance Component Computation (matches both direct course_id and course schedule_id records)
   const attendanceRows = (rawAttendanceRows || []).filter((att: any) => {

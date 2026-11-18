@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@newsim/database';
-import { ASSESSMENT_SELECT, formatAssessment, isAdminContext, requireAdmin, writeAdminAudit } from '@/lib/admin-api';
+import {
+  ASSESSMENT_SELECT,
+  formatAssessment,
+  isAdminContext,
+  requireAdmin,
+  resolveAssessmentModuleId,
+  writeAdminAudit,
+} from '@/lib/admin-api';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,16 +21,23 @@ export async function PATCH(
 
   try {
     const body = await request.json();
-    const { title, type, passingScore, durationMinutes, status } = body;
+    const { title, type, passingScore, durationMinutes, status, moduleId, description } = body;
+
+    const resolvedModule = await resolveAssessmentModuleId(id, moduleId);
+    if (resolvedModule.error) {
+      return NextResponse.json({ success: false, error: resolvedModule.error }, { status: 400 });
+    }
 
     const updates: Record<string, any> = {
       updated_at: new Date().toISOString(),
     };
     if (title !== undefined) updates.title = String(title).trim();
+    if (description !== undefined) updates.description = String(description || '').trim() || null;
     if (type !== undefined) updates.assessment_type = String(type).toUpperCase();
     if (passingScore !== undefined) updates.passing_score = !isNaN(Number(passingScore)) ? Number(passingScore) : 75;
     if (durationMinutes !== undefined) updates.duration_minutes = parseInt(durationMinutes, 10) || 60;
     if (status !== undefined) updates.status = status;
+    if (resolvedModule.provided) updates.module_id = resolvedModule.moduleId;
 
     const { data, error } = await supabaseAdmin
       .from('assessments')

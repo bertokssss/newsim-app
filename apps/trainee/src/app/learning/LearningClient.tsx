@@ -62,7 +62,7 @@ export default function LearningClient() {
           ? `/api/trainee/learning?courseId=${encodeURIComponent(rawCourseId)}`
           : '/api/trainee/learning';
 
-      const res = await fetch(endpoint);
+      const res = await fetch(endpoint, { cache: 'no-store' });
       const json = await res.json();
       if (json.success && Array.isArray(json.data)) {
         setLessons(json.data);
@@ -1096,7 +1096,7 @@ export default function LearningClient() {
                               {activeLesson.moduleAssessment.title || 'Module Competency Pre-Test'}
                             </h3>
                             <p className="text-[11px] font-mono text-slate-500">
-                              Total Questions: {activeLesson.moduleAssessment.questionsCount || activeLesson.moduleAssessment.questions?.length || 10} • Passing Score: {activeLesson.moduleAssessment.passingScore || 75}% • Reattempts Allowed if Failed
+                              Total Questions: {activeLesson.moduleAssessment.questionsCount ?? activeLesson.moduleAssessment.questions?.length ?? 0} • Passing Score: {activeLesson.moduleAssessment.passingScore || 75}% • Reattempts Allowed if Failed
                             </p>
                           </div>
                         </div>
@@ -1112,7 +1112,7 @@ export default function LearningClient() {
                             <CheckCircle className="w-3.5 h-3.5" />
                             <span>
                               {activeLesson.moduleAssessment.isPassed ? 'Passed: ' : 'Failed: '}
-                              {activeLesson.moduleAssessment.scoreDisplay || `${Math.round(((activeLesson.moduleAssessment.score ?? 0) * (activeLesson.moduleAssessment.questionsCount || 10)) / 100)}/${activeLesson.moduleAssessment.questionsCount || 10} (${activeLesson.moduleAssessment.score ?? 0}%)`}
+                              {activeLesson.moduleAssessment.scoreDisplay || `${Math.round(((activeLesson.moduleAssessment.score ?? 0) * (activeLesson.moduleAssessment.questionsCount ?? activeLesson.moduleAssessment.questions?.length ?? 0)) / 100)}/${activeLesson.moduleAssessment.questionsCount ?? activeLesson.moduleAssessment.questions?.length ?? 0} (${activeLesson.moduleAssessment.score ?? 0}%)`}
                             </span>
                           </span>
                         ) : (

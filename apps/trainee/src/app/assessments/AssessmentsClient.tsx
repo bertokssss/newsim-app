@@ -30,14 +30,17 @@ type Choice = { id: string; text: string; isCorrect?: boolean };
 type Question = {
   id: string;
   question: string;
+  questionType?: string;
   points: number;
   options: Choice[];
   correctChoiceId?: string | null;
+  correctAnswerText?: string | null;
 };
 
 type QuestionResult = {
   questionId: string;
   questionText: string;
+  questionType?: string;
   selectedChoiceId: string | null;
   selectedChoiceText?: string | null;
   isCorrect: boolean;
@@ -162,20 +165,28 @@ export default function AssessmentsClient() {
 
     if (asm.isAttempted && !isRetaking) {
       const qResults: QuestionResult[] = asm.questions.map((q) => {
-        const selectedChoiceId = (asm.userAnswers || {})[q.id] || null;
-        const picked = q.options.find((opt) => opt.id === selectedChoiceId);
-        const isCorrect = q.correctChoiceId ? q.correctChoiceId === selectedChoiceId : false;
-        const correctOpt = q.options.find((opt) => opt.id === q.correctChoiceId);
+        const isIdent = String(q.questionType || 'MULTIPLE_CHOICE').toUpperCase() === 'IDENTIFICATION';
+        const rawUserAnswer = (asm.userAnswers || {})[q.id] || null;
+        const picked = isIdent ? null : q.options.find((opt) => opt.id === rawUserAnswer);
+        const isCorrect = isIdent
+          ? Boolean(
+              rawUserAnswer &&
+                q.correctAnswerText &&
+                rawUserAnswer.trim().toLowerCase() === q.correctAnswerText.trim().toLowerCase()
+            )
+          : Boolean(q.correctChoiceId && q.correctChoiceId === rawUserAnswer);
+        const correctOpt = isIdent ? null : q.options.find((opt) => opt.id === q.correctChoiceId);
         return {
           questionId: q.id,
           questionText: q.question,
-          selectedChoiceId,
-          selectedChoiceText: picked?.text || null,
+          questionType: q.questionType,
+          selectedChoiceId: isIdent ? null : rawUserAnswer,
+          selectedChoiceText: isIdent ? rawUserAnswer : picked?.text || null,
           isCorrect,
           pointsEarned: isCorrect ? (q.points || 1) : 0,
           pointsPossible: q.points || 1,
           correctChoiceId: q.correctChoiceId || null,
-          correctChoiceText: correctOpt?.text || null,
+          correctChoiceText: q.correctAnswerText || correctOpt?.text || null,
         };
       });
 
@@ -252,18 +263,81 @@ export default function AssessmentsClient() {
     if (paramAssessmentId) router.replace(paramCourseId ? `/assessments?courseId=${paramCourseId}` : '/assessments');
   };
 
-  const answeredCount = activeExam ? activeExam.questions.filter((q) => selectedAnswers[q.id]).length : 0;
+  const answeredCount = activeExam
+    ? activeExam.questions.filter((q) => Boolean(String(selectedAnswers[q.id] || '').trim())).length
+    : 0;
   const totalQuestionsCount = activeExam ? activeExam.questions.length : 0;
   const allAnswered = Boolean(activeExam && totalQuestionsCount > 0 && answeredCount === totalQuestionsCount);
   const progressPercent = totalQuestionsCount > 0 ? Math.round((answeredCount / totalQuestionsCount) * 100) : 0;
 
   const currentQuestion = activeExam?.questions[currentQuestionIndex];
 
-  const handleSelectAnswer = (questionId: string, choiceId: string) => {
+  const handleSelectAnswer = (questionId: string, value: string) => {
     setSelectedAnswers((prev) => ({
       ...prev,
-      [questionId]: choiceId,
+      [questionId]: value,
     }));
+  };
+
+  const renderQuestionAnswerInput = (q: Question, compact = false) => {
+    const qType = String(q.questionType || 'MULTIPLE_CHOICE').toUpperCase();
+    if (qType === 'IDENTIFICATION') {
+      return (
+        <div className="space-y-1.5">
+          <label className="block text-[10px] font-mono font-bold uppercase text-sky-600 dark:text-sky-400">
+            Identification / Direct Answer
+          </label>
+          <input
+            type="text"
+            disabled={submitting}
+            value={selectedAnswers[q.id] || ''}
+            onChange={(e) => handleSelectAnswer(q.id, e.target.value)}
+            placeholder="Type your exact answer here..."
+            className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900/80 border border-slate-300 dark:border-slate-700 text-xs sm:text-sm text-slate-900 dark:text-[#F8FAFC] outline-none focus:ring-2 focus:ring-sky-500/40"
+          />
+        </div>
+      );
+    }
+
+    return q.options.map((opt, optIdx) => {
+      const isSelected = selectedAnswers[q.id] === opt.id;
+      const letter = String.fromCharCode(65 + optIdx);
+      return (
+        <button
+          key={opt.id}
+          type="button"
+          disabled={submitting}
+          onClick={() => handleSelectAnswer(q.id, opt.id)}
+          className={`w-full text-left font-sans transition-all flex items-center cursor-pointer ${
+            compact
+              ? `p-3 rounded-xl text-xs gap-3 ${
+                  isSelected
+                    ? 'bg-sky-600 text-white font-bold shadow-xs'
+                    : 'bg-white dark:bg-slate-900/60 text-slate-600 dark:text-[#CBD5E1] hover:bg-slate-100 dark:hover:bg-slate-700'
+                }`
+              : `p-3.5 sm:p-4 rounded-2xl text-xs sm:text-sm gap-3.5 border ${
+                  isSelected
+                    ? 'bg-sky-600 border-[#0B3D91] text-white font-bold shadow-md ring-2 ring-[#3BA7F2]/40'
+                    : 'bg-white dark:bg-slate-900/60 border-slate-200/80 dark:border-slate-800 text-slate-600 dark:text-[#CBD5E1] hover:border-sky-500/40 hover:bg-slate-100 dark:hover:bg-[#0a2544]'
+                }`
+          }`}
+        >
+          <span
+            className={`rounded-full border font-mono font-bold flex items-center justify-center shrink-0 ${
+              compact
+                ? `w-5 h-5 text-[11px] ${isSelected ? 'border-white bg-white/20' : 'border-slate-200/80 dark:border-slate-800'}`
+                : `w-6 h-6 text-xs ${
+                    isSelected ? 'border-white bg-white/20 text-white' : 'border-slate-200/80 dark:border-slate-800 text-sky-600 dark:text-sky-400'
+                  }`
+            }`}
+          >
+            {letter}
+          </span>
+          <span className={compact ? '' : 'flex-1'}>{opt.text}</span>
+          {!compact && isSelected && <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />}
+        </button>
+      );
+    });
   };
 
   const handleSubmitExam = async () => {
@@ -606,7 +680,7 @@ export default function AssessmentsClient() {
                   {/* Quick Question Stepper Pills */}
                   <div className="flex items-center gap-1.5 overflow-x-auto pb-1 pt-0.5">
                     {activeExam.questions.map((q, idx) => {
-                      const isAnswered = Boolean(selectedAnswers[q.id]);
+                      const isAnswered = Boolean(String(selectedAnswers[q.id] || '').trim());
                       const isCurrent = idx === currentQuestionIndex && viewMode === 'step' && !showReviewList;
 
                       let pillClass = 'bg-white dark:bg-white/5 border-slate-300 dark:border-slate-800 text-slate-600 dark:text-slate-300';
@@ -757,10 +831,30 @@ export default function AssessmentsClient() {
                       <div className="space-y-3">
                         {activeExam.questions.map((q, idx) => {
                           const res = submissionResult.questionResults?.find((r) => r.questionId === q.id);
-                          const userChoiceId = res ? res.selectedChoiceId : (selectedAnswers[q.id] || (activeExam.userAnswers || {})[q.id]);
-                          const isCorrect = res ? res.isCorrect : (q.correctChoiceId ? q.correctChoiceId === userChoiceId : false);
-                          const userChoice = q.options.find((opt) => opt.id === userChoiceId);
-                          const correctChoice = q.options.find((opt) => opt.id === (res?.correctChoiceId || q.correctChoiceId));
+                          const isIdent =
+                            String(q.questionType || res?.questionType || 'MULTIPLE_CHOICE').toUpperCase() === 'IDENTIFICATION';
+                          const rawUserAns = selectedAnswers[q.id] || (activeExam.userAnswers || {})[q.id] || '';
+                          const userChoiceId = res ? res.selectedChoiceId : (isIdent ? null : rawUserAns);
+                          const isCorrect = res
+                            ? res.isCorrect
+                            : isIdent
+                            ? Boolean(
+                                rawUserAns &&
+                                  q.correctAnswerText &&
+                                  rawUserAns.trim().toLowerCase() === q.correctAnswerText.trim().toLowerCase()
+                              )
+                            : Boolean(q.correctChoiceId && q.correctChoiceId === userChoiceId);
+                          const userChoice = isIdent ? null : q.options.find((opt) => opt.id === userChoiceId);
+                          const correctChoice = isIdent
+                            ? null
+                            : q.options.find((opt) => opt.id === (res?.correctChoiceId || q.correctChoiceId));
+                          const userAnswerDisplay =
+                            res?.selectedChoiceText ||
+                            userChoice?.text ||
+                            (isIdent ? rawUserAns : null) ||
+                            'No Answer Provided';
+                          const correctAnswerDisplay =
+                            res?.correctChoiceText || q.correctAnswerText || correctChoice?.text || null;
 
                           return (
                             <div
@@ -806,17 +900,17 @@ export default function AssessmentsClient() {
                                       isCorrect ? 'text-emerald-700 dark:text-emerald-300' : 'text-rose-700 dark:text-rose-300 line-through'
                                     }`}
                                   >
-                                    {userChoice?.text || 'No Answer Selected'}
+                                    {userAnswerDisplay}
                                   </span>
                                 </div>
 
-                                {!isCorrect && correctChoice && (
+                                {!isCorrect && correctAnswerDisplay && (
                                   <div className="flex items-center gap-2">
                                     <span className="font-mono text-[10px] text-emerald-600 dark:text-emerald-400 font-bold uppercase w-24 shrink-0">
                                       Correct Solution:
                                     </span>
                                     <span className="font-bold text-emerald-700 dark:text-emerald-300">
-                                      {correctChoice.text}
+                                      {correctAnswerDisplay}
                                     </span>
                                   </div>
                                 )}
@@ -829,7 +923,7 @@ export default function AssessmentsClient() {
                   </div>
                 ) : activeExam.questions.length === 0 ? (
                   <div className="py-12 text-center text-xs text-slate-500">
-                    No questions have been seeded for this assessment yet.
+                    No questions have been added to this assessment by the instructor yet.
                   </div>
                 ) : showReviewList || viewMode === 'all' ? (
                   /* ========================================================
@@ -845,7 +939,7 @@ export default function AssessmentsClient() {
 
                     <div className="space-y-4">
                       {activeExam.questions.map((q, idx) => {
-                        const isAnswered = Boolean(selectedAnswers[q.id]);
+                        const isAnswered = Boolean(String(selectedAnswers[q.id] || '').trim());
                         return (
                           <div
                             key={q.id}
@@ -870,33 +964,7 @@ export default function AssessmentsClient() {
                               </span>
                             </div>
 
-                            <div className="space-y-2">
-                              {q.options.map((opt, optIdx) => {
-                                const isSelected = selectedAnswers[q.id] === opt.id;
-                                return (
-                                  <button
-                                    key={opt.id}
-                                    type="button"
-                                    disabled={submitting}
-                                    onClick={() => handleSelectAnswer(q.id, opt.id)}
-                                    className={`w-full text-left p-3 rounded-xl text-xs font-sans transition-all flex items-center gap-3 cursor-pointer ${
-                                      isSelected
-                                        ? 'bg-sky-600 text-white font-bold shadow-xs'
-                                        : 'bg-white dark:bg-slate-900/60 text-slate-600 dark:text-[#CBD5E1] hover:bg-slate-100 dark:hover:bg-slate-700'
-                                    }`}
-                                  >
-                                    <span
-                                      className={`w-5 h-5 rounded-full border text-[11px] flex items-center justify-center shrink-0 ${
-                                        isSelected ? 'border-white bg-white/20' : 'border-slate-200/80 dark:border-slate-800'
-                                      }`}
-                                    >
-                                      {String.fromCharCode(65 + optIdx)}
-                                    </span>
-                                    <span>{opt.text}</span>
-                                  </button>
-                                );
-                              })}
-                            </div>
+                            <div className="space-y-2">{renderQuestionAnswerInput(q, true)}</div>
                           </div>
                         );
                       })}
@@ -923,40 +991,7 @@ export default function AssessmentsClient() {
                           {currentQuestion.question}
                         </h3>
 
-                        <div className="space-y-2.5 pt-1">
-                          {currentQuestion.options.map((opt, optIdx) => {
-                            const isSelected = selectedAnswers[currentQuestion.id] === opt.id;
-                            const letter = String.fromCharCode(65 + optIdx);
-
-                            return (
-                              <button
-                                key={opt.id}
-                                type="button"
-                                disabled={submitting}
-                                onClick={() => handleSelectAnswer(currentQuestion.id, opt.id)}
-                                className={`w-full text-left p-3.5 sm:p-4 rounded-2xl text-xs sm:text-sm font-sans transition-all flex items-center gap-3.5 cursor-pointer border ${
-                                  isSelected
-                                    ? 'bg-sky-600 border-[#0B3D91] text-white font-bold shadow-md ring-2 ring-[#3BA7F2]/40'
-                                    : 'bg-white dark:bg-slate-900/60 border-slate-200/80 dark:border-slate-800 text-slate-600 dark:text-[#CBD5E1] hover:border-sky-500/40 hover:bg-slate-100 dark:hover:bg-[#0a2544]'
-                                }`}
-                              >
-                                <span
-                                  className={`w-6 h-6 rounded-full border text-xs font-mono font-bold flex items-center justify-center shrink-0 ${
-                                    isSelected
-                                      ? 'border-white bg-white/20 text-white'
-                                      : 'border-slate-200/80 dark:border-slate-800 text-sky-600 dark:text-sky-400'
-                                  }`}
-                                >
-                                  {letter}
-                                </span>
-                                <span className="flex-1">{opt.text}</span>
-                                {isSelected && (
-                                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                                )}
-                              </button>
-                            );
-                          })}
-                        </div>
+                        <div className="space-y-2.5 pt-1">{renderQuestionAnswerInput(currentQuestion, false)}</div>
                       </div>
 
                       {/* Stepper Bottom Controls */}
@@ -972,7 +1007,11 @@ export default function AssessmentsClient() {
                         </button>
 
                         <span className="text-[11px] font-mono text-slate-500 hidden sm:inline">
-                          {selectedAnswers[currentQuestion.id] ? 'Choice recorded' : 'Please select an option'}
+                          {String(selectedAnswers[currentQuestion.id] || '').trim()
+                            ? 'Answer recorded'
+                            : String(currentQuestion.questionType || '').toUpperCase() === 'IDENTIFICATION'
+                            ? 'Please type your answer'
+                            : 'Please select an option'}
                         </span>
 
                         {currentQuestionIndex < totalQuestionsCount - 1 ? (

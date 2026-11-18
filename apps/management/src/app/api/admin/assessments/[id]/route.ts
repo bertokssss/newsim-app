@@ -5,6 +5,7 @@ import {
   formatAssessment,
   isAdminContext,
   requireAdmin,
+  resolveAssessmentModuleId,
 } from '@/lib/admin-api';
 
 export const dynamic = 'force-dynamic';
@@ -43,9 +44,29 @@ export async function PATCH(
   try {
     const { id } = await params;
     const body = await request.json();
-    const updates: Record<string, unknown> = {};
-    if (body.title !== undefined) updates.title = body.title;
+    const { data: existing } = await supabaseAdmin
+      .from('assessments')
+      .select('id, course_id')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (!existing) {
+      return NextResponse.json({ success: false, error: 'Assessment not found' }, { status: 404 });
+    }
+
+    const targetCourseId = body.courseId !== undefined ? body.courseId : existing.course_id;
+    const resolvedModule = await resolveAssessmentModuleId(targetCourseId, body.moduleId);
+    if (resolvedModule.error) {
+      return NextResponse.json({ success: false, error: resolvedModule.error }, { status: 400 });
+    }
+
+    const updates: Record<string, unknown> = {
+      updated_at: new Date().toISOString(),
+    };
+    if (body.title !== undefined) updates.title = String(body.title).trim();
+    if (body.description !== undefined) updates.description = String(body.description || '').trim() || null;
     if (body.courseId !== undefined) updates.course_id = body.courseId;
+    if (resolvedModule.provided) updates.module_id = resolvedModule.moduleId;
     if (body.type !== undefined) updates.assessment_type = String(body.type).toUpperCase();
     if (body.passingScore !== undefined) updates.passing_score = !isNaN(Number(body.passingScore)) ? Number(body.passingScore) : 75;
     if (body.durationMinutes !== undefined) updates.duration_minutes = parseInt(body.durationMinutes, 10);

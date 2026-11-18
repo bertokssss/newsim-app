@@ -3,6 +3,8 @@ import { getTraineeLearningMaterials, recordTraineeLessonCompletion, resetTraine
 import { verifyTraineeRequestAsync, createUnauthorizedResponse, createForbiddenResponse } from '@newsim/auth';
 import { dispatchDailyEmailNotification } from '@/lib/daily-sync';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(req: NextRequest) {
   try {
     const auth = await verifyTraineeRequestAsync(req, 'COURSE_VIEW');

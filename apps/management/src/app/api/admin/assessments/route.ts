@@ -7,6 +7,7 @@ import {
   matchesSearch,
   requestMeta,
   requireAdmin,
+  resolveAssessmentModuleId,
   unwrap,
   writeAdminAudit,
 } from '@/lib/admin-api';
@@ -90,7 +91,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { title, courseId, type, passingScore, durationMinutes } = body;
+    const { title, courseId, moduleId, description, type, passingScore, durationMinutes, seedDefaultQuestions } = body;
     const { ip, userAgent } = requestMeta(request);
 
     if (!title || !courseId) {
@@ -100,13 +101,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const resolvedModule = await resolveAssessmentModuleId(courseId, moduleId);
+    if (resolvedModule.error) {
+      return NextResponse.json({ success: false, error: resolvedModule.error }, { status: 400 });
+    }
+
     const { data, error } = await supabaseAdmin
       .from('assessments')
       .insert({
         title: String(title).trim(),
+        description: description ? String(description).trim() : null,
         course_id: courseId,
+        module_id: resolvedModule.moduleId,
         assessment_type: (type || 'WRITTEN').toUpperCase(),
-        passing_score: parseInt(passingScore, 10) || 75,
+        passing_score: !isNaN(Number(passingScore)) ? Number(passingScore) : 75,
         duration_minutes: parseInt(durationMinutes, 10) || 60,
         status: 'PUBLISHED',
       })
@@ -115,10 +123,12 @@ export async function POST(request: NextRequest) {
 
     if (error) throw error;
 
-    try {
-      await ensureDefaultAssessmentQuestions(data.id, data.title, 10);
-    } catch (seedErr) {
-      console.warn('Could not seed default 10 questions for new assessment:', seedErr);
+    if (seedDefaultQuestions === true) {
+      try {
+        await ensureDefaultAssessmentQuestions(data.id, data.title, 10);
+      } catch (seedErr) {
+        console.warn('Could not seed default 10 questions for new assessment:', seedErr);
+      }
     }
 
     await writeAdminAudit({
