@@ -329,8 +329,8 @@ export const sendDailyLessonReadyEmail = async (
     await transporter.sendMail({
       from: `"NEWSIM Training Dispatch" <${process.env.SMTP_USER}>`,
       to,
-      subject: `Your Maritime Lesson Today is Ready - Don't Miss Out! (Day ${dayNumber})`,
-      text: `Hello ${name},\n\nYour lesson for today, Day ${dayNumber}: ${moduleTitle} (${courseTitle}), is now ready in your NEWSIM Trainee Portal!\n\nPlease complete today's module and assessment before 11:59 PM today (${scheduledDate}). Under STCW daily progression guidelines, uncompleted daily modules are automatically marked as failed.\n\nAccess your lesson now:\n${actionUrl}`,
+      subject: `Module ${dayNumber} Unlocked: ${moduleTitle} (${courseTitle})`,
+      text: `Hello ${name},\n\nModule ${dayNumber}: ${moduleTitle} (${courseTitle}) is now unlocked in your NEWSIM Trainee Portal!\n\nYou can study sequentially at your own pace and complete all required modules and quizzes within your 3-day modular completion window (you may finish earlier in 1, 2, or 3 days). If a quiz score falls below passing, reattempts are available.\n\nAccess your module now:\n${actionUrl}`,
       html: `
         <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 620px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff;">
           <div style="text-align: center; margin-bottom: 20px; border-bottom: 2px solid #0B3D91; padding-bottom: 16px;">
@@ -338,45 +338,45 @@ export const sendDailyLessonReadyEmail = async (
               NEWSIM Maritime Training System
             </div>
             <h1 style="color: #0B3D91; margin: 12px 0 4px 0; font-size: 22px; font-weight: 900; letter-spacing: -0.5px;">
-              Your Lesson Today is Ready! ⚓
+              Module Unlocked in Your Course ⚓
             </h1>
             <p style="color: #64748b; font-size: 13px; margin: 0; font-weight: 500;">
-              Daily Curriculum Progression Notice • <strong>Don't Miss Out!</strong>
+              Self-Paced Sequential Learning • 3-Day Completion Window
             </p>
           </div>
 
           <div style="padding: 20px; background-color: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 10px; margin-bottom: 20px;">
             <p style="color: #166534; font-size: 14px; line-height: 1.5; margin: 0 0 12px 0;">
               Hello <strong>${name}</strong>,<br/>
-              Your assigned training module for today is now unlocked and available in the learning player:
+              The next training module in your enrolled course is now unlocked and ready in your learning player:
             </p>
             <div style="background-color: #ffffff; border: 1px solid #dcfce7; border-radius: 8px; padding: 14px; margin-bottom: 12px;">
               <div style="color: #0B3D91; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px;">
-                Day ${dayNumber} Curriculum • ${courseTitle}
+                Module ${dayNumber} • ${courseTitle}
               </div>
               <div style="color: #0f172a; font-size: 16px; font-weight: 800; margin-top: 4px;">
                 ${moduleTitle}
               </div>
               <div style="color: #64748b; font-size: 12px; margin-top: 4px;">
-                Scheduled Date: <strong>${scheduledDate}</strong> (Today)
+                Activated Date: <strong>${scheduledDate}</strong>
               </div>
             </div>
-            <p style="color: #b45309; font-size: 12px; font-weight: 600; margin: 0; line-height: 1.4;">
-              ⚠️ <strong>Mandatory Daily Requirement:</strong> You must complete today's module reading and corresponding assessment before midnight (11:59 PM). If uncompleted today, this specific module will automatically be marked as <strong>FAILED</strong>.
+            <p style="color: #0f766e; font-size: 12px; font-weight: 600; margin: 0; line-height: 1.4;">
+              ✓ <strong>Flexible Pacing:</strong> You may finish your modules in 1, 2, or up to 3 days from enrollment activation. Sequential modules unlock as soon as you read each module and take its quiz.
             </p>
           </div>
 
           <div style="text-align: center; margin: 28px 0;">
             <a href="${actionUrl}" target="_blank" style="display: inline-block; background-color: #0B3D91; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 10px; font-weight: 800; font-size: 14px; box-shadow: 0 4px 10px rgba(11, 61, 145, 0.25);">
-              Open Today's Lesson &amp; Assessment →
+              Open Module &amp; Assessment →
             </a>
           </div>
 
           <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; margin-top: 24px; font-size: 12px; color: #475569; line-height: 1.5;">
             <strong>Training Progression Roadmap:</strong>
             <ul style="margin: 6px 0 0 0; padding-left: 20px;">
-              <li>Complete 1 module per day and its corresponding quiz.</li>
-              <li>Once all daily modules are finished, undergo the practical simulator session to qualify for your official certificate.</li>
+              <li>Complete each module and pass its assessment at your own pace within the 3-day modular window.</li>
+              <li>Reattempt any assessment in the Assessments Center if your score is below passing.</li>
             </ul>
           </div>
 
@@ -399,10 +399,10 @@ export const sendModuleFailedEmail = async (
   courseTitle: string,
   moduleTitle: string,
   dayNumber: number,
-  reason: string = 'Missed daily completion deadline'
+  reason: string = 'Modular completion deadline notice'
 ) => {
   if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
-    console.log(`[MOCK EMAIL] To: ${to} | Module FAILED: ${moduleTitle} (Reason: ${reason})`);
+    console.log(`[MOCK EMAIL] To: ${to} | Module Notice: ${moduleTitle} (Reason: ${reason})`);
     return { success: true, mocked: true };
   }
 
@@ -410,35 +410,35 @@ export const sendModuleFailedEmail = async (
     await transporter.sendMail({
       from: `"NEWSIM Training Dispatch" <${process.env.SMTP_USER}>`,
       to,
-      subject: `Notice: Module Marked as FAILED - ${moduleTitle} (${courseTitle})`,
-      text: `Hello ${name},\n\nYou did not complete Day ${dayNumber}: ${moduleTitle} (${courseTitle}) on its scheduled date.\n\nIn accordance with maritime training policy, this specific module has been automatically marked as FAILED (${reason}).\n\nPlease continue completing your remaining daily modules and prepare for your practical session.`,
+      subject: `Assessment Reattempt Available - ${moduleTitle} (${courseTitle})`,
+      text: `Hello ${name},\n\nModule ${dayNumber}: ${moduleTitle} (${courseTitle}) requires a passing score or completion (${reason}).\n\nPlease log in to the NEWSIM Trainee Portal to complete or reattempt the assessment before your modular deadline.`,
       html: `
-        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #fecaca; border-radius: 12px; background-color: #ffffff;">
-          <div style="text-align: center; margin-bottom: 20px; border-bottom: 2px solid #dc2626; padding-bottom: 16px;">
-            <h1 style="color: #dc2626; margin: 0; font-size: 20px; font-weight: 900;">
-              Notice of Module Failure
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #fde68a; border-radius: 12px; background-color: #ffffff;">
+          <div style="text-align: center; margin-bottom: 20px; border-bottom: 2px solid #d97706; padding-bottom: 16px;">
+            <h1 style="color: #d97706; margin: 0; font-size: 20px; font-weight: 900;">
+              Module Completion &amp; Reattempt Notice
             </h1>
             <p style="color: #64748b; font-size: 13px; margin: 4px 0 0 0;">
               NEWSIM Maritime Academic Operations
             </p>
           </div>
 
-          <div style="padding: 18px; background-color: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; margin-bottom: 20px;">
-            <p style="color: #991b1b; font-size: 14px; margin: 0 0 10px 0;">
+          <div style="padding: 18px; background-color: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; margin-bottom: 20px;">
+            <p style="color: #92400e; font-size: 14px; margin: 0 0 10px 0;">
               Hello <strong>${name}</strong>,<br/>
-              The scheduled completion window for Day ${dayNumber}: <strong>${moduleTitle}</strong> (${courseTitle}) has closed.
+              Module ${dayNumber}: <strong>${moduleTitle}</strong> (${courseTitle}) needs your attention.
             </p>
-            <div style="background-color: #ffffff; border: 1px solid #f87171; border-radius: 6px; padding: 12px; color: #b91c1c; font-size: 13px;">
-              <strong>Status:</strong> AUTOMATICALLY FAILED<br/>
-              <strong>Reason:</strong> ${reason}
+            <div style="background-color: #ffffff; border: 1px solid #f59e0b; border-radius: 6px; padding: 12px; color: #b45309; font-size: 13px;">
+              <strong>Status:</strong> REATTEMPT / COMPLETION REQUIRED<br/>
+              <strong>Details:</strong> ${reason}
             </div>
-            <p style="color: #7f1d1d; font-size: 12px; margin: 10px 0 0 0; line-height: 1.4;">
-              Under maritime training regulations, daily modules must be completed on their scheduled day. Please ensure you complete your remaining modules on time.
+            <p style="color: #78350f; font-size: 12px; margin: 10px 0 0 0; line-height: 1.4;">
+              Please complete all required modules and assessments within your course's 3-day modular window. If you scored below passing, you can reattempt the quiz immediately in the Assessments Center.
             </p>
           </div>
 
           <p style="color: #475569; font-size: 13px; text-align: center;">
-            Log in to the Trainee Portal to check your remaining syllabus and upcoming practical simulator schedule.
+            Log in to the Trainee Portal to continue your modules and earn certification.
           </p>
         </div>
       `,

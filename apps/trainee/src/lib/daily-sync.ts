@@ -44,7 +44,7 @@ export async function dispatchDailyEmailNotification(params: {
         params.courseTitle,
         params.moduleTitle,
         params.dayNumber,
-        params.reason || 'Missed daily completion deadline'
+        params.reason || 'Modular completion deadline notice'
       );
     } else if (params.type === 'PRACTICAL_SCHEDULED' && params.practicalDetails) {
       await sendPracticalSessionReminderEmail(

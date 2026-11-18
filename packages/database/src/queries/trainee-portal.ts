@@ -1553,7 +1553,7 @@ export async function getTraineeCourseDetails(courseId: string, traineeId: strin
 /**
  * Trainee Schedules
  * Differentiates between:
- * 1. Daily Online Modules (1 per day)
+ * 1. Online Theory Modules (self-paced within 3-day modular window)
  * 2. In-Person Practical Simulator Sessions (The Set Time - required to qualify for certificate)
  */
 export async function getTraineeSchedulesList(traineeId: string, onNotifyEmail?: any) {
@@ -3099,7 +3099,7 @@ export interface DailyModuleSyncResult {
 }
 
 /**
- * Synchronize Daily Module Progression (1 Module Per Day)
+ * Synchronize Sequential Module Progression (Self-Paced within 3-Day Window)
  * - Assigns concrete daily dates (Day 1, Day 2, Day 3...)
  * - Automatically fails modules if trainee misses completion on their scheduled day
  * - Unlocks today's module and dispatches email notification ("Today's Lesson is Ready - Don't Miss Out!")
@@ -3651,7 +3651,7 @@ export async function getTraineeLearningMaterials(
     });
   });
 
-  // 1 Module Per Day Sync & Evaluation
+  // Sequential Module Sync & Evaluation (Self-Paced within 3-Day Window)
   const dailySyncResults = await syncTraineeDailyModules(resolvedId, targetCourseId, onNotifyEmail);
   const dailySyncMap = new Map<string, DailyModuleSyncResult>();
   dailySyncResults.forEach((r) => dailySyncMap.set(r.moduleId, r));
@@ -3659,7 +3659,7 @@ export async function getTraineeLearningMaterials(
   let lessons: any[] = [];
   let counter = 1;
 
-  // Sequential Module Unlocking & Daily Pacing: 1 Module Per Day
+  // Sequential Module Unlocking (Self-Paced within 3-Day Window)
   let previousModulePassed = true;
   let previousModuleName = '';
 

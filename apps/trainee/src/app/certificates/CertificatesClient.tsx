@@ -664,7 +664,7 @@ export default function CertificatesClient() {
       <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 flex items-center gap-3 text-xs">
         <ShieldCheck className="w-5 h-5 text-sky-500 shrink-0" />
         <p className="text-slate-600 dark:text-[#CBD5E1] font-sans leading-relaxed">
-          <strong>STCW Qualification Standard:</strong> Completion of daily online theory modules qualifies you for the <strong>In-Person Practical Simulator Drills</strong>. Official certificates and claim slips are released once the supervising instructor validates practical competency.
+          <strong>NEWSIM Certification Standard:</strong> Complete all required online modules and assessments within your 3-day modular window. <strong>Modular / In-House</strong> courses issue certificates once academic records are validated; <strong>Modular + Practical</strong> courses also require practical evaluation competency before certificate release.
         </p>
       </div>
 
@@ -675,7 +675,7 @@ export default function CertificatesClient() {
         <div className="py-16 text-center rounded-3xl bg-white dark:bg-[#0c1a2c] border border-slate-200/80 dark:border-slate-800 p-8 space-y-3">
           <ShieldCheck className="w-8 h-8 text-sky-500 mx-auto" />
           <p className="text-sm font-bold text-slate-800 dark:text-[#CBD5E1]">No certificates earned yet.</p>
-          <p className="text-xs text-slate-600 dark:text-[#94A3B8] font-mono">Complete all course modules and pass simulator practicals to earn certification.</p>
+          <p className="text-xs text-slate-600 dark:text-[#94A3B8] font-mono">Complete all required modules, pass assessments, and finish any required practical evaluation to earn certification.</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

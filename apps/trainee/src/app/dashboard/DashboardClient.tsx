@@ -391,7 +391,7 @@ export default function TraineeDashboardClient() {
             <div className="flex items-center gap-2">
               <Activity className="w-4 h-4 text-sky-500" />
               <h3 className="font-extrabold text-sm sm:text-base text-slate-900 dark:text-[#F8FAFC] font-heading">
-                Daily Study Momentum &amp; Assessment Benchmark
+                Study Momentum &amp; Assessment Benchmark
               </h3>
             </div>
             <p className="text-xs text-slate-500 font-sans">
@@ -691,7 +691,7 @@ export default function TraineeDashboardClient() {
                             {isDaily ? `${s.sessionCode || 'MODULE'} • ${s.formattedDate || s.date}` : `PRACTICAL • ${s.formattedDate || s.date}`}
                           </span>
                           <span className="text-[10px] text-slate-500 font-semibold">
-                            {s.isSetTime ? s.time : (s.isDueToday ? '🔔 Due Today' : (s.isCompleted ? '✓ Completed' : 'Online'))}
+                            {s.isSetTime ? s.time : (s.isDueToday ? '▶ Ready' : (s.isCompleted ? '✓ Completed' : 'Online'))}
                           </span>
                         </div>
                         <div className="font-bold text-xs text-slate-900 dark:text-[#F8FAFC] truncate">

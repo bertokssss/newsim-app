@@ -159,7 +159,7 @@ export default function ProgressClient() {
             Progress &amp; Performance Analytics
           </h1>
           <p className="text-xs sm:text-sm text-slate-600 dark:text-[#CBD5E1] font-sans mt-0.5">
-            STCW-compliant progress tracking: daily 1-module theory pacing, score trajectories, and practical simulator competency.
+            Self-paced modular progression (finish within your 3-day window), assessment score trajectories, and competency readiness.
           </p>
         </div>
 
@@ -223,21 +223,21 @@ export default function ProgressClient() {
           className="p-6 rounded-3xl bg-white dark:bg-[#0c1a2c] border border-slate-200/80 dark:border-slate-800 shadow-sm relative overflow-hidden flex flex-col justify-between transition-all"
         >
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-mono uppercase font-bold text-slate-400">Daily Theory Modules</span>
+            <span className="text-[11px] font-mono uppercase font-bold text-slate-400">Online Theory Modules</span>
             <BookOpen className="w-4 h-4 text-emerald-500" />
           </div>
           <div className="text-2xl font-extrabold text-slate-900 dark:text-[#F8FAFC] font-heading mt-2">
             {progress.totalPassedModules} <span className="text-sm text-slate-400 font-normal">/ {progress.totalRequiredModules} Passed</span>
           </div>
           {progress.totalFailedModules > 0 ? (
-            <span className="text-[11px] font-mono text-rose-600 dark:text-rose-400 font-bold block mt-2 flex items-center gap-1">
+            <span className="text-[11px] font-mono text-amber-600 dark:text-amber-400 font-bold block mt-2 flex items-center gap-1">
               <XCircle className="w-3.5 h-3.5 shrink-0" />
-              <span>{progress.totalFailedModules} Failed (Missed Daily Quorum)</span>
+              <span>{progress.totalFailedModules} Needs Reattempt (Below Passing Score)</span>
             </span>
           ) : (
             <span className="text-[11px] font-mono text-emerald-600 dark:text-emerald-400 font-bold block mt-2 flex items-center gap-1">
               <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-              <span>All active daily modules on track</span>
+              <span>All active theory modules on track</span>
             </span>
           )}
         </motion.div>
@@ -269,14 +269,14 @@ export default function ProgressClient() {
           className="p-6 rounded-3xl bg-white dark:bg-[#0c1a2c] border border-slate-200/80 dark:border-slate-800 shadow-sm relative overflow-hidden flex flex-col justify-between transition-all"
         >
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-mono uppercase font-bold text-slate-400">Daily Study Streak</span>
+            <span className="text-[11px] font-mono uppercase font-bold text-slate-400">Study Momentum</span>
             <Flame className="w-4 h-4 text-amber-500 fill-amber-500" />
           </div>
           <div className="text-3xl font-extrabold text-amber-500 font-heading mt-2 flex items-center gap-2">
             <span>{progress.streakDays} {progress.streakDays === 1 ? 'Day' : 'Days'}</span>
           </div>
           <span className="text-[11px] font-mono text-slate-400 block mt-2">
-            1 module unlocked per day
+            Self-paced within 3-day modular window
           </span>
         </motion.div>
       </motion.div>

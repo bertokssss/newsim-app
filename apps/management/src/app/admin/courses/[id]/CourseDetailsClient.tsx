@@ -1719,7 +1719,7 @@ export default function CourseDetailsClient({ courseId }: { courseId: string }) 
                   }}
                   className="px-2.5 py-1 rounded-lg bg-white dark:bg-white/5 border border-slate-200 dark:border-slate-800 text-[10px] font-mono font-bold hover:border-emerald-500 transition-colors cursor-pointer"
                 >
-                  1 Module/Day
+                  Match Modules
                 </button>
                 <button
                   type="button"

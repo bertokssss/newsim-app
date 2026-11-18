@@ -283,13 +283,13 @@ export default function SchedulesClient() {
           >
             <span>Online Theory Modules</span>
             {dueTodayCount > 0 && (
-              <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500 text-white">
-                {dueTodayCount} Due
+              <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-sky-500 text-white">
+                {dueTodayCount} Ready
               </span>
             )}
             {failedModulesCount > 0 && (
-              <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-rose-500 text-white">
-                {failedModulesCount} Failed
+              <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500 text-white">
+                {failedModulesCount} Reattempt
               </span>
             )}
           </button>
@@ -502,9 +502,9 @@ export default function SchedulesClient() {
                               </span>
                             ) : isDueToday ? (
                               <div className="flex items-center gap-2">
-                                <span className="px-3 py-1 rounded-full text-xs font-mono font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1.5 animate-pulse">
+                                <span className="px-3 py-1 rounded-full text-xs font-mono font-bold bg-sky-500/15 text-sky-600 dark:text-sky-400 border border-sky-500/30 flex items-center gap-1.5">
                                   <Bell className="w-3.5 h-3.5" />
-                                  <span>DUE TODAY</span>
+                                  <span>AVAILABLE</span>
                                 </span>
                                 <Link
                                   href={`/learning?courseId=${s.courseId}`}

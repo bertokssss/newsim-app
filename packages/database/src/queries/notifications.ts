@@ -1585,23 +1585,23 @@ export async function dispatchNotificationEvent(params: DispatchEventParams): Pr
           break;
 
         case 'DAILY_LESSON_READY':
-          t = t || "Your Lesson Today is Ready - Don't Miss Out!";
-          m = m || `Day ${meta.dayNumber || ''}: ${meta.moduleTitle || courseName} is ready today${meta.scheduledDate ? ` (${meta.scheduledDate})` : ''}. Complete your reading and module quiz before 11:59 PM.`;
+          t = t || `Module ${meta.dayNumber ? `${meta.dayNumber} ` : ''}Unlocked - ${meta.moduleTitle || courseName}`;
+          m = m || `Module ${meta.dayNumber ? `${meta.dayNumber}: ` : ''}${meta.moduleTitle || courseName} is now available. Complete the reading and quiz at your own pace within your 3-day modular completion window.`;
           u = u || (effectiveCourseId ? `/learning?courseId=${effectiveCourseId}` : '/learning');
           break;
 
         case 'TRAINEE_FALLING_BEHIND':
           if (role === 'TRAINEE') {
-            t = t || `Notice: Module Marked as FAILED - ${meta.moduleTitle || courseName}`;
-            m = m || `You did not complete Day ${meta.dayNumber || ''} (${meta.moduleTitle || courseName}) on its scheduled date (${meta.scheduledDate || 'today'}). Under STCW daily progression guidelines, this module is automatically marked as failed.`;
-            u = u || (effectiveCourseId ? `/learning?courseId=${effectiveCourseId}` : '/learning');
+            t = t || `Module Assessment Update - ${meta.moduleTitle || courseName}`;
+            m = m || `Module ${meta.dayNumber ? `${meta.dayNumber} ` : ''}(${meta.moduleTitle || courseName}) requires completion or reattempt before your modular deadline.`;
+            u = u || (effectiveCourseId ? `/assessments?courseId=${effectiveCourseId}` : '/assessments');
           } else if (role === 'INSTRUCTOR') {
-            t = t || 'Trainee Missed Daily Module';
-            m = m || `${traineeName} missed Day ${meta.dayNumber || ''} (${meta.moduleTitle || courseName}) scheduled for ${meta.scheduledDate || 'today'}.`;
+            t = t || 'Trainee Module Progress Alert';
+            m = m || `${traineeName} needs completion or reattempt on Module ${meta.dayNumber || ''} (${meta.moduleTitle || courseName}).`;
             u = u || '/progress';
           } else {
-            t = t || 'Trainee Daily Module Failure';
-            m = m || `${traineeName} missed Day ${meta.dayNumber || ''} (${meta.moduleTitle || courseName}) under STCW daily progression.`;
+            t = t || 'Trainee Module Deadline Alert';
+            m = m || `${traineeName} has incomplete or pending module requirements for ${meta.moduleTitle || courseName}.`;
             u = u || '/admin/enrollments';
           }
           break;
