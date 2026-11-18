@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@newsim/database';
 import {
+  computeEndDate,
+  findScheduleConflict,
   formatSchedule,
+  getCourseTotalDays,
   isAdminContext,
   parseClockToIso,
   requestMeta,
   requireAdmin,
   SCHEDULE_SELECT,
+  toManilaDateAndMinutes,
   writeAdminAudit,
 } from '@/lib/admin-api';
 
@@ -55,8 +59,35 @@ export async function PATCH(
         updates.completion_confirmed_at = new Date().toISOString();
       }
     }
-    if (body.date && body.startTime) updates.start_at = parseClockToIso(body.date, body.startTime);
-    if (body.date && body.endTime) updates.end_at = parseClockToIso(body.date, body.endTime);
+    if (body.date !== undefined || body.startTime !== undefined || body.endTime !== undefined) {
+      const exStart = toManilaDateAndMinutes(existing.start_at);
+      const exEnd = toManilaDateAndMinutes(existing.end_at);
+      const resolvedDate = String(body.date || exStart?.dateStr || '').trim();
+      const resolvedStartTime = String(body.startTime || exStart?.timeLabel || '08:00 AM').trim();
+      const resolvedEndTime = String(body.endTime || exEnd?.timeLabel || '12:00 PM').trim();
+
+      if (resolvedDate) {
+        const startCheckIso = parseClockToIso(resolvedDate, resolvedStartTime);
+        const endCheckIso = parseClockToIso(resolvedDate, resolvedEndTime);
+        if (new Date(endCheckIso).getTime() <= new Date(startCheckIso).getTime()) {
+          return NextResponse.json(
+            { success: false, error: 'Invalid session duration: End time must be later than start time.' },
+            { status: 400 }
+          );
+        }
+
+        const { data: courseRow } = await supabaseAdmin
+          .from('courses')
+          .select('id, category, duration_hours, theory_days, practical_days')
+          .eq('id', updates.course_id || existing.course_id)
+          .maybeSingle();
+
+        const totalDays = courseRow ? getCourseTotalDays(courseRow) : 1;
+        const calculatedEndDateStr = computeEndDate(resolvedDate, totalDays);
+        updates.start_at = startCheckIso;
+        updates.end_at = parseClockToIso(calculatedEndDateStr, resolvedEndTime);
+      }
+    }
 
     const finalStartAt = (updates.start_at || existing.start_at) as string;
     const finalEndAt = (updates.end_at || existing.end_at) as string;
@@ -84,41 +115,16 @@ export async function PATCH(
 
       if (checkErr) throw checkErr;
 
-      for (const other of (otherSchedules || [])) {
-        if (!other.start_at || !other.end_at) continue;
-        const exStartMs = new Date(other.start_at).getTime();
-        const exEndMs = new Date(other.end_at).getTime();
+      const conflictMsg = findScheduleConflict({
+        startAt: finalStartAt,
+        endAt: finalEndAt,
+        room: finalRoom,
+        instructorId: finalInstructorId as string | null,
+        existingSchedules: otherSchedules || [],
+      });
 
-        const overlaps = startAtMs < exEndMs && endAtMs > exStartMs;
-        if (!overlaps) continue;
-
-        const courseRel = Array.isArray(other.courses) ? other.courses[0] : other.courses;
-        const courseLabel = courseRel?.code ? `${courseRel.code} - ${courseRel.name || ''}` : courseRel?.name || 'Session';
-        const timeLabel = `${new Date(other.start_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })} to ${new Date(other.end_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}`;
-
-        if (other.room && other.room.toLowerCase().trim() === finalRoom.toLowerCase().trim()) {
-          return NextResponse.json(
-            {
-              success: false,
-              error: `Classroom Conflict: "${finalRoom}" is already occupied by ${courseLabel} from ${timeLabel}.`,
-            },
-            { status: 409 }
-          );
-        }
-
-        if (finalInstructorId && other.instructor_id && other.instructor_id === finalInstructorId) {
-          const insRel = Array.isArray(other.instructors) ? other.instructors[0] : other.instructors;
-          const insProf = Array.isArray(insRel?.profiles) ? insRel.profiles[0] : insRel?.profiles;
-          const insName = insProf ? `${insProf.first_name} ${insProf.last_name}`.trim() : 'The assigned instructor';
-
-          return NextResponse.json(
-            {
-              success: false,
-              error: `Instructor Overlap Conflict: ${insName} is already assigned to ${courseLabel} in ${other.room || 'another room'} from ${timeLabel}.`,
-            },
-            { status: 409 }
-          );
-        }
+      if (conflictMsg) {
+        return NextResponse.json({ success: false, error: conflictMsg }, { status: 409 });
       }
     }
 

@@ -27,6 +27,27 @@ import { UserAvatar } from '@newsim/ui';
 
 const easeCurve: [number, number, number, number] = [0.22, 1, 0.36, 1];
 
+const ATTENDANCE_STATUS_FILTERS = ['ALL', 'NOT_MARKED', 'PRESENT', 'LATE', 'ABSENT', 'EXCUSED'] as const;
+
+function getAttendanceBadgeClass(status: string): string {
+  switch (String(status || '').toUpperCase()) {
+    case 'PRESENT':
+      return 'bg-emerald-500/15 text-emerald-600 border border-emerald-500/30';
+    case 'LATE':
+      return 'bg-amber-500/15 text-amber-600 border border-amber-500/30';
+    case 'EXCUSED':
+      return 'bg-sky-500/15 text-sky-600 border border-sky-500/30';
+    case 'NOT_MARKED':
+      return 'bg-slate-500/15 text-slate-600 dark:text-slate-300 border border-slate-400/30';
+    default:
+      return 'bg-rose-500/15 text-rose-600 border border-rose-500/30';
+  }
+}
+
+function formatAttendanceStatusLabel(status: string): string {
+  return String(status || '').toUpperCase() === 'NOT_MARKED' ? 'ENROLLED • NOT MARKED' : status;
+}
+
 export default function AttendanceClient() {
   const [records, setRecords] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -53,6 +74,8 @@ export default function AttendanceClient() {
   const [selectedSessionId, setSelectedSessionId] = useState<string>('');
   const [sessionRosterSearch, setSessionRosterSearch] = useState('');
   const [sessionStatusFilter, setSessionStatusFilter] = useState('ALL');
+  const [modalSessionRecords, setModalSessionRecords] = useState<any[] | null>(null);
+  const [loadingModalRoster, setLoadingModalRoster] = useState(false);
 
   // Audit / Modify Modal
   const [selectedRecord, setSelectedRecord] = useState<any | null>(null);
@@ -60,6 +83,13 @@ export default function AttendanceClient() {
   const [newStatus, setNewStatus] = useState('PRESENT');
   const [reason, setReason] = useState('');
   const [submittingAudit, setSubmittingAudit] = useState(false);
+
+  const openAttendanceActionModal = (record: any) => {
+    setSelectedRecord(record);
+    setNewStatus(record.status === 'NOT_MARKED' ? 'PRESENT' : record.status);
+    setReason(record.hasAttendanceRecord === false ? '' : record.remarks || '');
+    setEditModalOpen(true);
+  };
 
   const fetchAttendance = async () => {
     try {
@@ -70,7 +100,7 @@ export default function AttendanceClient() {
       if (courseFilter !== 'ALL') query.set('courseId', courseFilter);
       if (sessionFilter !== 'ALL') query.set('scheduleId', sessionFilter);
 
-      const res = await fetch(`/api/admin/attendance?${query.toString()}`);
+      const res = await fetch(`/api/admin/attendance?${query.toString()}`, { cache: 'no-store' });
       const json = await res.json();
       if (json.success) {
         setRecords(json.data || []);
@@ -82,16 +112,45 @@ export default function AttendanceClient() {
     }
   };
 
+  const fetchModalSessionRoster = async (scheduleId: string) => {
+    if (!scheduleId) {
+      setModalSessionRecords(null);
+      return;
+    }
+    try {
+      setLoadingModalRoster(true);
+      const res = await fetch(`/api/admin/attendance?scheduleId=${encodeURIComponent(scheduleId)}`, {
+        cache: 'no-store',
+      });
+      const json = await res.json();
+      if (json.success) {
+        setModalSessionRecords(json.data || []);
+      }
+    } catch (err) {
+      console.error('Failed to load session roster:', err);
+    } finally {
+      setLoadingModalRoster(false);
+    }
+  };
+
   useEffect(() => {
     fetchAttendance();
   }, [debouncedSearch, statusFilter, courseFilter, sessionFilter]);
 
   useEffect(() => {
+    if (sessionModalOpen && selectedSessionId) {
+      fetchModalSessionRoster(selectedSessionId);
+    } else if (!selectedSessionId) {
+      setModalSessionRecords(null);
+    }
+  }, [sessionModalOpen, selectedSessionId]);
+
+  useEffect(() => {
     const loadLookups = async () => {
       try {
         const [schedRes, coursesRes] = await Promise.all([
-          fetch('/api/admin/schedules'),
-          fetch('/api/admin/courses?limit=200'),
+          fetch('/api/admin/schedules', { cache: 'no-store' }),
+          fetch('/api/admin/courses?limit=200', { cache: 'no-store' }),
         ]);
         const [schedJson, coursesJson] = await Promise.all([schedRes.json(), coursesRes.json()]);
         if (schedJson.success) setSchedules(schedJson.data || []);
@@ -102,6 +161,11 @@ export default function AttendanceClient() {
     };
     loadLookups();
   }, []);
+
+  const attendanceCourses = useMemo(() => {
+    const recordCourseIds = new Set(records.map((r) => r.courseId).filter(Boolean));
+    return courses.filter((c) => !c.isFullModular || recordCourseIds.has(c.id));
+  }, [courses, records]);
 
   // Filtered schedules for session dropdowns based on course
   const availableSchedulesForFilter = useMemo(() => {
@@ -152,9 +216,14 @@ export default function AttendanceClient() {
 
   // Trainees roster in the selected session
   const sessionTraineeRoster = useMemo(() => {
+    if (selectedSessionId && modalSessionRecords) {
+      return modalSessionRecords;
+    }
     if (!selectedSessionId && selectedSessionCourseId === 'ALL') return records;
     return records.filter((r) => {
-      const matchSession = selectedSessionId ? r.scheduleId === selectedSessionId || r.sessionCode === activeModalSession?.sessionCode : true;
+      const matchSession = selectedSessionId
+        ? r.scheduleId === selectedSessionId || r.sessionCode === activeModalSession?.sessionCode
+        : true;
       const matchCourse =
         selectedSessionCourseId !== 'ALL'
           ? r.courseId === selectedSessionCourseId ||
@@ -162,7 +231,7 @@ export default function AttendanceClient() {
           : true;
       return matchSession && matchCourse;
     });
-  }, [records, selectedSessionId, selectedSessionCourseId, activeModalSession]);
+  }, [records, modalSessionRecords, selectedSessionId, selectedSessionCourseId, activeModalSession]);
 
   // Filtered session roster by search and status
   const filteredSessionRoster = useMemo(() => {
@@ -186,7 +255,8 @@ export default function AttendanceClient() {
     const late = sessionTraineeRoster.filter((r) => r.status === 'LATE').length;
     const absent = sessionTraineeRoster.filter((r) => r.status === 'ABSENT').length;
     const excused = sessionTraineeRoster.filter((r) => r.status === 'EXCUSED').length;
-    const rate = total > 0 ? Math.round(((present + late) / total) * 100) : 0;
+    const markedTotal = present + late + absent + excused;
+    const rate = markedTotal > 0 ? Math.round(((present + late) / markedTotal) * 100) : 0;
     return { total, present, late, absent, excused, rate };
   }, [sessionTraineeRoster]);
 
@@ -195,14 +265,35 @@ export default function AttendanceClient() {
     if (!selectedRecord) return;
     setSubmittingAudit(true);
     try {
-      const res = await fetch(`/api/admin/attendance/${selectedRecord.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: newStatus, remarks: reason }),
-      });
+      const isInitialRecord = selectedRecord.hasAttendanceRecord === false || selectedRecord.status === 'NOT_MARKED';
+      const res = isInitialRecord
+        ? await fetch('/api/admin/attendance', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              scheduleId: selectedRecord.scheduleId || undefined,
+              courseId: selectedRecord.courseId,
+              batchId: selectedRecord.batchId || undefined,
+              traineeId: selectedRecord.traineeId,
+              sessionDate:
+                selectedRecord.date && /^\d{4}-\d{2}-\d{2}$/.test(selectedRecord.date)
+                  ? selectedRecord.date
+                  : undefined,
+              status: newStatus,
+              remarks: reason,
+            }),
+          })
+        : await fetch(`/api/admin/attendance/${selectedRecord.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: newStatus, remarks: reason }),
+          });
       if (res.ok) {
         setEditModalOpen(false);
-        fetchAttendance();
+        await fetchAttendance();
+        if (sessionModalOpen && selectedSessionId) {
+          await fetchModalSessionRoster(selectedSessionId);
+        }
       } else {
         const json = await res.json().catch(() => ({}));
         alert(json.error || 'Failed to update attendance status');
@@ -326,7 +417,7 @@ export default function AttendanceClient() {
                 className="bg-transparent text-xs font-semibold text-slate-700 dark:text-slate-200 outline-none max-w-[200px] truncate"
               >
                 <option value="ALL">All Courses</option>
-                {courses.map((c) => (
+                {attendanceCourses.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.code ? `[${c.code}] ` : ''}{c.title}
                   </option>
@@ -375,7 +466,7 @@ export default function AttendanceClient() {
             <span className="text-[11px] font-mono text-slate-400 uppercase mr-1 flex items-center gap-1">
               <Filter className="w-3 h-3" /> Status:
             </span>
-            {['ALL', 'PRESENT', 'LATE', 'ABSENT', 'EXCUSED'].map((st) => (
+            {ATTENDANCE_STATUS_FILTERS.map((st) => (
               <button
                 key={st}
                 onClick={() => setStatusFilter(st)}
@@ -385,7 +476,7 @@ export default function AttendanceClient() {
                     : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-[#CBD5E1] hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
-                {st}
+                {st === 'NOT_MARKED' ? 'Enrolled (Not Marked)' : st}
               </button>
             ))}
           </div>
@@ -480,23 +571,15 @@ export default function AttendanceClient() {
                         />
                         <span>{r.instructorName || 'Assigned Instructor'}</span>
                         <span className="text-[9px] px-1 py-0.2 rounded bg-slate-100 dark:bg-white/5 text-slate-400 font-sans">
-                          Instructor Log
+                          {r.hasAttendanceRecord === false ? 'Enrolled Roster' : 'Instructor Log'}
                         </span>
                       </div>
                     </td>
                     <td className="py-3.5 px-4">
                       <span
-                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-mono font-bold ${
-                          r.status === 'PRESENT'
-                            ? 'bg-emerald-500/15 text-emerald-600 border border-emerald-500/30'
-                            : r.status === 'LATE'
-                            ? 'bg-amber-500/15 text-amber-600 border border-amber-500/30'
-                            : r.status === 'EXCUSED'
-                            ? 'bg-sky-500/15 text-sky-600 border border-sky-500/30'
-                            : 'bg-rose-500/15 text-rose-600 border border-rose-500/30'
-                        }`}
+                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-mono font-bold ${getAttendanceBadgeClass(r.status)}`}
                       >
-                        {r.status}
+                        {formatAttendanceStatusLabel(r.status)}
                       </span>
                     </td>
                     <td className="py-3.5 px-4 text-slate-500 italic max-w-xs truncate">
@@ -513,18 +596,13 @@ export default function AttendanceClient() {
                           <Eye className="w-3 h-3" />
                           <span>Session</span>
                         </button>
-                        {/* Modify / Audit Status Button */}
+                        {/* Mark / Audit Status Button */}
                         <button
-                          onClick={() => {
-                            setSelectedRecord(r);
-                            setNewStatus(r.status);
-                            setReason(r.remarks || '');
-                            setEditModalOpen(true);
-                          }}
+                          onClick={() => openAttendanceActionModal(r)}
                           className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-[#CBD5E1] font-mono text-[10px] font-bold transition-colors"
-                          title="Audit / modify attendance status"
+                          title={r.hasAttendanceRecord === false ? 'Mark attendance for enrolled trainee' : 'Audit / modify attendance status'}
                         >
-                          Audit
+                          {r.hasAttendanceRecord === false ? 'Mark' : 'Audit'}
                         </button>
                       </div>
                     </td>
@@ -600,7 +678,7 @@ export default function AttendanceClient() {
                     className="w-full px-3 py-2 rounded-xl bg-white dark:bg-[#0c1a2c] border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-[#F8FAFC] outline-none text-xs font-semibold"
                   >
                     <option value="ALL">All Courses</option>
-                    {courses.map((c) => (
+                    {attendanceCourses.map((c) => (
                       <option key={c.id} value={c.id}>
                         {c.code ? `[${c.code}] ` : ''}{c.title}
                       </option>
@@ -733,17 +811,17 @@ export default function AttendanceClient() {
                   />
                 </div>
                 <div className="flex items-center gap-1 overflow-x-auto pb-1 sm:pb-0">
-                  {['ALL', 'PRESENT', 'LATE', 'ABSENT', 'EXCUSED'].map((st) => (
+                  {ATTENDANCE_STATUS_FILTERS.map((st) => (
                     <button
                       key={st}
                       onClick={() => setSessionStatusFilter(st)}
-                      className={`px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold uppercase transition-all ${
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold uppercase whitespace-nowrap transition-all ${
                         sessionStatusFilter === st
                           ? 'bg-emerald-600 text-white'
                           : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-[#CBD5E1] hover:text-slate-900 dark:hover:text-white'
                       }`}
                     >
-                      {st}
+                      {st === 'NOT_MARKED' ? 'NOT MARKED' : st}
                     </button>
                   ))}
                 </div>
@@ -762,12 +840,18 @@ export default function AttendanceClient() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-white/5">
-                    {filteredSessionRoster.length === 0 ? (
+                    {loadingModalRoster ? (
+                      <tr>
+                        <td colSpan={5} className="py-10 text-center text-slate-400 font-mono text-xs">
+                          Loading enrolled practical trainee roster...
+                        </td>
+                      </tr>
+                    ) : filteredSessionRoster.length === 0 ? (
                       <tr>
                         <td colSpan={5} className="py-10 text-center text-slate-400 font-mono text-xs">
                           {selectedSessionId
-                            ? 'No trainee attendance records logged for this session yet.'
-                            : 'Please select a session from above to inspect the trainee attendance roster.'}
+                            ? 'No enrolled trainees or attendance records found for this session.'
+                            : 'No enrolled practical trainees found for the selected course.'}
                         </td>
                       </tr>
                     ) : (
@@ -790,17 +874,9 @@ export default function AttendanceClient() {
                           </td>
                           <td className="py-2.5 px-3">
                             <span
-                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
-                                trainee.status === 'PRESENT'
-                                  ? 'bg-emerald-500/15 text-emerald-600 border border-emerald-500/30'
-                                  : trainee.status === 'LATE'
-                                  ? 'bg-amber-500/15 text-amber-600 border border-amber-500/30'
-                                  : trainee.status === 'EXCUSED'
-                                  ? 'bg-sky-500/15 text-sky-600 border border-sky-500/30'
-                                  : 'bg-rose-500/15 text-rose-600 border border-rose-500/30'
-                              }`}
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${getAttendanceBadgeClass(trainee.status)}`}
                             >
-                              {trainee.status}
+                              {formatAttendanceStatusLabel(trainee.status)}
                             </span>
                           </td>
                           <td className="py-2.5 px-3 text-slate-500 italic max-w-xs truncate">
@@ -808,15 +884,10 @@ export default function AttendanceClient() {
                           </td>
                           <td className="py-2.5 px-3 text-right">
                             <button
-                              onClick={() => {
-                                setSelectedRecord(trainee);
-                                setNewStatus(trainee.status);
-                                setReason(trainee.remarks || '');
-                                setEditModalOpen(true);
-                              }}
+                              onClick={() => openAttendanceActionModal(trainee)}
                               className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-mono text-[10px] font-bold transition-colors"
                             >
-                              Audit / Modify
+                              {trainee.hasAttendanceRecord === false ? 'Mark Attendance' : 'Audit / Modify'}
                             </button>
                           </td>
                         </tr>
@@ -874,10 +945,14 @@ export default function AttendanceClient() {
               <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
                 <div>
                   <h3 className="text-base font-extrabold text-slate-900 dark:text-[#F8FAFC] font-heading">
-                    Administrative Attendance Audit
+                    {selectedRecord.hasAttendanceRecord === false
+                      ? 'Record Trainee Attendance'
+                      : 'Administrative Attendance Audit'}
                   </h3>
                   <p className="text-[10px] text-slate-400 font-mono">
-                    Audit log required for regulatory STCW compliance
+                    {selectedRecord.hasAttendanceRecord === false
+                      ? 'Initial practical roll call for enrolled trainee'
+                      : 'Audit log required for regulatory STCW compliance'}
                   </p>
                 </div>
                 <button
@@ -937,14 +1012,20 @@ export default function AttendanceClient() {
 
                 <div>
                   <label className="block text-slate-600 dark:text-[#CBD5E1] font-mono uppercase text-[10px] mb-1 font-bold">
-                    Audit Justification / Authorized Reason <span className="text-rose-500">*</span>
+                    {selectedRecord.hasAttendanceRecord === false
+                      ? 'Attendance Remarks / Notes (Optional)'
+                      : <>Audit Justification / Authorized Reason <span className="text-rose-500">*</span></>}
                   </label>
                   <textarea
-                    required
+                    required={selectedRecord.hasAttendanceRecord !== false}
                     rows={3}
                     value={reason}
                     onChange={(e) => setReason(e.target.value)}
-                    placeholder="State reason for administrative status adjustment (e.g. Authorized medical leave certificate submitted, simulator makeup session)..."
+                    placeholder={
+                      selectedRecord.hasAttendanceRecord === false
+                        ? 'Optional notes for initial practical session roll call...'
+                        : 'State reason for administrative status adjustment (e.g. Authorized medical leave certificate submitted, simulator makeup session)...'
+                    }
                     className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-[#F8FAFC] outline-none"
                   />
                 </div>
@@ -962,7 +1043,11 @@ export default function AttendanceClient() {
                     disabled={submittingAudit}
                     className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-semibold shadow-md disabled:opacity-50"
                   >
-                    {submittingAudit ? 'Logging...' : 'Confirm & Log Audit'}
+                    {submittingAudit
+                      ? 'Saving...'
+                      : selectedRecord.hasAttendanceRecord === false
+                      ? 'Record Attendance'
+                      : 'Confirm & Log Audit'}
                   </button>
                 </div>
               </form>

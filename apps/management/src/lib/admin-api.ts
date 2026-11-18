@@ -617,7 +617,8 @@ export function formatAttendance(row: any) {
     traineeId: row.trainee_id,
     traineeName: formatProfileName(traineeProfile),
     traineeAvatarUrl: traineeProfile?.avatar_url || null,
-    traineeSrn: trainee?.trainee_number || '',
+    traineeSrn: trainee?.srn || trainee?.trainee_number || '',
+    hasAttendanceRecord: true,
     instructorId: schedule?.instructor_id || batch?.instructor_id || '',
     instructorName: formatProfileName(instructorProfile) || 'Assigned Instructor',
     instructorAvatarUrl: instructorProfile?.avatar_url || null,
@@ -818,7 +819,7 @@ export function formatBatch(row: any) {
 export const SCHEDULE_SELECT =
   '*, courses(id, code, name, category, duration_hours, theory_days, practical_days), instructors(profiles(first_name, last_name, avatar_url)), training_centers(name)';
 export const ATTENDANCE_SELECT =
-  '*, trainees(trainee_number, profiles(first_name, last_name, avatar_url)), courses(id, code, name, training_center_id), batches(id, batch_code, instructor_id, instructors(profiles(first_name, last_name, avatar_url))), schedules(id, start_at, end_at, room, instructor_id, course_id, training_center_id, courses(id, code, name), instructors(profiles(first_name, last_name, avatar_url)))';
+  '*, trainees(trainee_number, srn, profiles(first_name, last_name, avatar_url)), courses(id, code, name, training_center_id), batches(id, batch_code, instructor_id, instructors(profiles(first_name, last_name, avatar_url))), schedules(id, start_at, end_at, room, instructor_id, course_id, training_center_id, courses(id, code, name), instructors(profiles(first_name, last_name, avatar_url)))';
 export const PAYMENT_SELECT =
   '*, trainees(profiles(first_name, last_name, email, phone, avatar_url)), enrollments(id, status, training_center_id, courses(code, name))';
 export const CERTIFICATE_SELECT =
@@ -901,6 +902,130 @@ export function parseClockToIso(dateStr: string, timeStr: string): string {
     throw new Error('Invalid date or time');
   }
   return fallback.toISOString();
+}
+
+export function getCourseTotalDays(course: any): number {
+  const isFullModular = isFullModularCourseRow(course);
+  const durationHours = Number(course?.duration_hours || course?.durationHours || 40);
+  const durationDays = Math.max(1, Math.ceil(durationHours / 8));
+  const theoryDays = isFullModular
+    ? Math.min(3, durationDays)
+    : Number(
+        course?.theory_days ??
+          course?.theoryDays ??
+          (durationDays === 1 ? 1 : Math.max(1, Math.round(durationDays * 0.4)))
+      );
+  const practicalDays = isFullModular
+    ? 0
+    : Number(
+        course?.practical_days ??
+          course?.practicalDays ??
+          (durationDays === 1 ? 0 : Math.max(0, durationDays - theoryDays))
+      );
+  return Math.max(1, theoryDays + practicalDays);
+}
+
+export function toManilaDateAndMinutes(isoStr: string | null | undefined): {
+  dateStr: string;
+  minutes: number;
+  timeLabel: string;
+} | null {
+  if (!isoStr) return null;
+  const d = new Date(isoStr);
+  if (Number.isNaN(d.getTime())) return null;
+  const dateStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(d);
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Manila',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(d);
+  const rawHour = parseInt(parts.find((p) => p.type === 'hour')?.value || '0', 10);
+  const hour = rawHour === 24 ? 0 : rawHour;
+  const minute = parseInt(parts.find((p) => p.type === 'minute')?.value || '0', 10);
+  const timeLabel = d
+    .toLocaleTimeString('en-US', {
+      timeZone: 'Asia/Manila',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    })
+    .replace(/\s+/g, ' ')
+    .trim();
+  return { dateStr, minutes: hour * 60 + minute, timeLabel };
+}
+
+export function doSchedulesOverlapDaily(
+  startIsoA: string,
+  endIsoA: string,
+  startIsoB: string,
+  endIsoB: string
+): boolean {
+  const aStart = toManilaDateAndMinutes(startIsoA);
+  const aEnd = toManilaDateAndMinutes(endIsoA);
+  const bStart = toManilaDateAndMinutes(startIsoB);
+  const bEnd = toManilaDateAndMinutes(endIsoB);
+
+  if (!aStart || !aEnd || !bStart || !bEnd) {
+    return new Date(startIsoA).getTime() < new Date(endIsoB).getTime() &&
+      new Date(endIsoA).getTime() > new Date(startIsoB).getTime();
+  }
+
+  // First ensure calendar date ranges overlap
+  if (aStart.dateStr > bEnd.dateStr || aEnd.dateStr < bStart.dateStr) {
+    return false;
+  }
+
+  // Compare daily clock intervals so non-overlapping morning (08:00-12:00) and afternoon (13:00-17:00) sessions can share a day/room/instructor
+  if (aEnd.minutes > aStart.minutes && bEnd.minutes > bStart.minutes) {
+    return aStart.minutes < bEnd.minutes && aEnd.minutes > bStart.minutes;
+  }
+
+  return new Date(startIsoA).getTime() < new Date(endIsoB).getTime() &&
+    new Date(endIsoA).getTime() > new Date(startIsoB).getTime();
+}
+
+export function findScheduleConflict(params: {
+  startAt: string;
+  endAt: string;
+  room: string;
+  instructorId?: string | null;
+  existingSchedules: any[];
+}): string | null {
+  const { startAt, endAt, room, instructorId, existingSchedules } = params;
+  const normalizedRoom = (room || '').toLowerCase().trim();
+  const cleanInstructorId = instructorId ? String(instructorId).trim() : null;
+
+  for (const existing of existingSchedules || []) {
+    if (!existing.start_at || !existing.end_at) continue;
+    if (!doSchedulesOverlapDaily(startAt, endAt, existing.start_at, existing.end_at)) {
+      continue;
+    }
+
+    const courseRel = Array.isArray(existing.courses) ? existing.courses[0] : existing.courses;
+    const courseLabel = courseRel?.code ? `${courseRel.code} - ${courseRel.name || ''}` : courseRel?.name || 'Session';
+    const exStart = toManilaDateAndMinutes(existing.start_at);
+    const exEnd = toManilaDateAndMinutes(existing.end_at);
+    const dateRange = exStart && exEnd
+      ? exStart.dateStr === exEnd.dateStr
+        ? exStart.dateStr
+        : `${exStart.dateStr} to ${exEnd.dateStr}`
+      : '';
+    const timeLabel = exStart && exEnd ? `${dateRange ? `${dateRange}, ` : ''}${exStart.timeLabel} - ${exEnd.timeLabel}` : '';
+
+    if (normalizedRoom && existing.room && existing.room.toLowerCase().trim() === normalizedRoom) {
+      return `Classroom Conflict: "${room}" is already booked for ${courseLabel} (${timeLabel}). Please choose another room or timeframe.`;
+    }
+
+    if (cleanInstructorId && existing.instructor_id && existing.instructor_id === cleanInstructorId) {
+      const insRel = Array.isArray(existing.instructors) ? existing.instructors[0] : existing.instructors;
+      const insProf = Array.isArray(insRel?.profiles) ? insRel.profiles[0] : insRel?.profiles;
+      const insName = insProf ? `${insProf.first_name} ${insProf.last_name}`.trim() : 'Selected instructor';
+      return `Instructor Overlap Conflict: ${insName} is already assigned to ${courseLabel} in ${existing.room || 'another room'} (${timeLabel}).`;
+    }
+  }
+
+  return null;
 }
 
 export function matchesSearch(haystack: Array<string | number | null | undefined>, search: string) {

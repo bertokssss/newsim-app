@@ -16,7 +16,8 @@ import {
   ChevronRight,
   Sparkles,
   BarChart3,
-  Layers
+  Layers,
+  Edit3
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -72,6 +73,55 @@ const cascadeItem = {
   },
 };
 
+const DAILY_START_OPTIONS = [
+  '07:00 AM',
+  '08:00 AM',
+  '09:00 AM',
+  '10:00 AM',
+  '11:00 AM',
+  '12:00 PM',
+  '01:00 PM',
+  '02:00 PM',
+  '03:00 PM',
+  '04:00 PM',
+  '05:00 PM',
+  '06:00 PM',
+];
+
+const DAILY_END_OPTIONS = [
+  '09:00 AM',
+  '10:00 AM',
+  '11:00 AM',
+  '12:00 PM',
+  '01:00 PM',
+  '02:00 PM',
+  '03:00 PM',
+  '04:00 PM',
+  '05:00 PM',
+  '06:00 PM',
+  '07:00 PM',
+  '08:00 PM',
+  '09:00 PM',
+];
+
+function clockToMinutes(label: string): number {
+  const m = (label || '').replace(/\s+/g, ' ').trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (!m) return 0;
+  let h = parseInt(m[1], 10);
+  const mins = parseInt(m[2], 10);
+  const ap = m[3].toUpperCase();
+  if (ap === 'PM' && h < 12) h += 12;
+  if (ap === 'AM' && h === 12) h = 0;
+  return h * 60 + mins;
+}
+
+function normalizeClockLabel(label: string | undefined, fallback: string): string {
+  const cleaned = (label || '').replace(/\s+/g, ' ').trim();
+  const m = cleaned.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (!m) return fallback;
+  return `${String(parseInt(m[1], 10)).padStart(2, '0')}:${m[2]} ${m[3].toUpperCase()}`;
+}
+
 function computeEndDate(startDateStr: string, totalDays: number): string {
   if (!startDateStr) return '';
   const parts = startDateStr.split('-');
@@ -97,6 +147,7 @@ export default function SchedulesClient() {
   const [filterMode, setFilterMode] = useState<'UPCOMING' | 'ALL'>('UPCOMING');
   const [roomChartInView, setRoomChartInView] = useState(false);
   const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [editingScheduleId, setEditingScheduleId] = useState<string | null>(null);
   const [conflictError, setConflictError] = useState<string | null>(null);
   const [successNotification, setSuccessNotification] = useState<string | null>(null);
   const [courses, setCourses] = useState<any[]>([]);
@@ -243,6 +294,52 @@ export default function SchedulesClient() {
     }
   };
 
+  const handleOpenCreateModal = () => {
+    setEditingScheduleId(null);
+    setConflictError(null);
+    setFormData((prev) => ({
+      ...prev,
+      courseId: prev.courseId || courses[0]?.id || '',
+      instructorId: prev.instructorId || instructors[0]?.instructorId || instructors[0]?.id || '',
+      room: 'Training Hall A',
+      date: new Date().toISOString().split('T')[0],
+      startTime: '08:00 AM',
+      endTime: '12:00 PM',
+      capacity: '24',
+    }));
+    setCreateModalOpen(true);
+  };
+
+  const handleOpenEditModal = (sched: any) => {
+    setEditingScheduleId(sched.id);
+    setConflictError(null);
+    setFormData({
+      courseId: sched.courseId || '',
+      instructorId: sched.instructorId || '',
+      room: sched.room || 'Training Hall A',
+      date: sched.startDate || sched.date || new Date().toISOString().split('T')[0],
+      startTime: normalizeClockLabel(sched.startTime, '08:00 AM'),
+      endTime: normalizeClockLabel(sched.endTime, '12:00 PM'),
+      capacity: String(sched.capacity || 24),
+    });
+    setCreateModalOpen(true);
+  };
+
+  const handleStartTimeChange = (nextStart: string) => {
+    const startMins = clockToMinutes(nextStart);
+    const currentEndMins = clockToMinutes(formData.endTime);
+    let nextEnd = formData.endTime;
+    if (currentEndMins <= startMins) {
+      const targetMins = startMins + 240;
+      const candidate =
+        DAILY_END_OPTIONS.find((opt) => clockToMinutes(opt) >= targetMins) ||
+        DAILY_END_OPTIONS.find((opt) => clockToMinutes(opt) > startMins) ||
+        DAILY_END_OPTIONS[DAILY_END_OPTIONS.length - 1];
+      nextEnd = candidate;
+    }
+    setFormData((prev) => ({ ...prev, startTime: nextStart, endTime: nextEnd }));
+  };
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     setConflictError(null);
@@ -252,21 +349,33 @@ export default function SchedulesClient() {
       return;
     }
 
+    if (!editingScheduleId || !isSelectedCourseFullModular) {
+      if (clockToMinutes(formData.endTime) <= clockToMinutes(formData.startTime)) {
+        setConflictError('Daily end time must be later than daily start time.');
+        return;
+      }
+    }
+
     setSubmitting(true);
     try {
-      const res = await fetch('/api/admin/schedules', {
-        method: 'POST',
+      const url = editingScheduleId ? `/api/admin/schedules/${editingScheduleId}` : '/api/admin/schedules';
+      const method = editingScheduleId ? 'PATCH' : 'POST';
+      const res = await fetch(url, {
+        method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData),
       });
       const json = await res.json();
       if (json.success) {
         setCreateModalOpen(false);
+        setEditingScheduleId(null);
         const count = json.activatedTraineesCount;
         setSuccessNotification(
-          count && count > 0
-            ? `Course assigned successfully! Initiated active course progress for ${count} enrolled trainee${count > 1 ? 's' : ''}.`
-            : 'Course successfully assigned to instructor and schedule registered.'
+          editingScheduleId
+            ? 'Training schedule updated successfully.'
+            : count && count > 0
+              ? `Course assigned successfully! Initiated active course progress for ${count} enrolled trainee${count > 1 ? 's' : ''}.`
+              : 'Course successfully assigned to instructor and schedule registered.'
         );
         setTimeout(() => setSuccessNotification(null), 6000);
         setFormData((prev) => ({
@@ -283,7 +392,7 @@ export default function SchedulesClient() {
       }
     } catch (err) {
       console.error(err);
-      setConflictError('Failed to assign course. Please try again.');
+      setConflictError(editingScheduleId ? 'Failed to update schedule. Please try again.' : 'Failed to assign course. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -431,10 +540,7 @@ export default function SchedulesClient() {
           </div>
 
           <button
-            onClick={() => {
-              setConflictError(null);
-              setCreateModalOpen(true);
-            }}
+            onClick={handleOpenCreateModal}
             className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 hover:from-emerald-500 hover:to-teal-500 text-white font-semibold text-xs shadow-md shadow-emerald-500/25 transition-all active:scale-[0.98]"
           >
             <Plus className="w-4 h-4" />
@@ -865,7 +971,17 @@ export default function SchedulesClient() {
 
                 <div className="mt-5 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs font-mono">
                   <span className="text-slate-400">{s.centerName || 'Main Training Center'}</span>
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {!s.isFullModular && s.status !== 'CANCELLED' && s.status !== 'COMPLETED' && (
+                      <button
+                        onClick={() => handleOpenEditModal(s)}
+                        className="px-2.5 py-1 rounded-xl bg-sky-500/15 hover:bg-sky-600 text-sky-700 dark:text-sky-300 hover:text-white border border-sky-500/30 text-[10px] font-bold transition-all inline-flex items-center gap-1 cursor-pointer"
+                        title="Edit schedule date, daily hours, room, or instructor"
+                      >
+                        <Edit3 className="w-3 h-3" />
+                        <span>Edit</span>
+                      </button>
+                    )}
                     <button
                       onClick={() => handleOpenSubstituteModal(s)}
                       className="px-2.5 py-1 rounded-xl bg-purple-500/15 hover:bg-purple-600 text-purple-700 dark:text-purple-300 hover:text-white border border-purple-500/30 text-[10px] font-bold transition-all inline-flex items-center gap-1 cursor-pointer"
@@ -920,7 +1036,9 @@ export default function SchedulesClient() {
               <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
                 <div className="flex items-center gap-2">
                   <Sparkles className="w-5 h-5 text-emerald-500" />
-                  <h3 className="text-base font-extrabold text-slate-900 dark:text-[#F8FAFC] font-heading">Assign Course to Instructor</h3>
+                  <h3 className="text-base font-extrabold text-slate-900 dark:text-[#F8FAFC] font-heading">
+                    {editingScheduleId ? 'Edit Training Schedule & Hours' : 'Assign Course to Instructor'}
+                  </h3>
                 </div>
                 <button disabled={submitting} onClick={() => setCreateModalOpen(false)} className="text-slate-400 hover:text-slate-900 dark:hover:text-white disabled:opacity-50">
                   <X className="w-5 h-5" />
@@ -928,17 +1046,19 @@ export default function SchedulesClient() {
               </div>
 
               {/* Informational Callout */}
-              <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-800 dark:text-emerald-300 text-xs font-mono space-y-1">
-                <div className="flex items-center gap-1.5 font-bold text-[11px] uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
-                  <Sparkles className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                  <span>Automatic Trainee Progress Activation</span>
+              {!editingScheduleId && (
+                <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-800 dark:text-emerald-300 text-xs font-mono space-y-1">
+                  <div className="flex items-center gap-1.5 font-bold text-[11px] uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
+                    <Sparkles className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                    <span>Automatic Trainee Progress Activation</span>
+                  </div>
+                  <p className="text-[11px] leading-relaxed text-emerald-700/90 dark:text-emerald-300/90">
+                    Assigning this course to the instructor will immediately initiate course progress and unlock training modules for all enrolled trainees.
+                  </p>
                 </div>
-                <p className="text-[11px] leading-relaxed text-emerald-700/90 dark:text-emerald-300/90">
-                  Assigning this course to the instructor will immediately initiate course progress and unlock training modules for all enrolled trainees.
-                </p>
-              </div>
+              )}
 
-              {isSelectedCourseOngoing && (
+              {!editingScheduleId && isSelectedCourseOngoing && (
                 <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-300 text-xs font-mono space-y-1">
                   <div className="flex items-center gap-1.5 font-bold text-[11px] uppercase tracking-wide text-amber-700 dark:text-amber-300">
                     <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
@@ -962,9 +1082,10 @@ export default function SchedulesClient() {
                   <label className="block text-slate-600 dark:text-[#CBD5E1] font-mono uppercase text-[10px] mb-1">Select Course *</label>
                   <select
                     required
+                    disabled={Boolean(editingScheduleId)}
                     value={formData.courseId}
                     onChange={(e) => setFormData({ ...formData, courseId: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-[#F8FAFC] outline-none font-mono"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-[#F8FAFC] outline-none font-mono disabled:opacity-70"
                   >
                     <option value="">-- Select Course --</option>
                     {courses.map((c) => {
@@ -1060,13 +1181,17 @@ export default function SchedulesClient() {
                         <label className="block text-slate-600 dark:text-[#CBD5E1] font-mono uppercase text-[10px] mb-1">Daily Start Time</label>
                         <select
                           value={formData.startTime}
-                          onChange={(e) => setFormData({ ...formData, startTime: e.target.value })}
+                          onChange={(e) => handleStartTimeChange(e.target.value)}
                           className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-[#F8FAFC] outline-none font-mono"
                         >
-                          <option>08:00 AM</option>
-                          <option>10:00 AM</option>
-                          <option>01:00 PM</option>
-                          <option>03:00 PM</option>
+                          {!DAILY_START_OPTIONS.includes(formData.startTime) && (
+                            <option value={formData.startTime}>{formData.startTime}</option>
+                          )}
+                          {DAILY_START_OPTIONS.map((t) => (
+                            <option key={t} value={t}>
+                              {t}
+                            </option>
+                          ))}
                         </select>
                       </div>
                       <div>
@@ -1076,10 +1201,16 @@ export default function SchedulesClient() {
                           onChange={(e) => setFormData({ ...formData, endTime: e.target.value })}
                           className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-[#F8FAFC] outline-none font-mono"
                         >
-                          <option>12:00 PM</option>
-                          <option>02:00 PM</option>
-                          <option>05:00 PM</option>
-                          <option>07:00 PM</option>
+                          {!DAILY_END_OPTIONS.includes(formData.endTime) && (
+                            <option value={formData.endTime}>{formData.endTime}</option>
+                          )}
+                          {DAILY_END_OPTIONS.filter(
+                            (t) => clockToMinutes(t) > clockToMinutes(formData.startTime)
+                          ).map((t) => (
+                            <option key={t} value={t}>
+                              {t}
+                            </option>
+                          ))}
                         </select>
                       </div>
                     </div>
@@ -1134,9 +1265,9 @@ export default function SchedulesClient() {
                   </button>
                   <button
                     type="submit"
-                    disabled={submitting || isSelectedCourseOngoing}
+                    disabled={submitting || (!editingScheduleId && isSelectedCourseOngoing)}
                     className={`px-4 py-2 rounded-xl font-semibold shadow-md flex items-center gap-2 transition-all active:scale-[0.98] ${
-                      isSelectedCourseOngoing
+                      !editingScheduleId && isSelectedCourseOngoing
                         ? 'bg-amber-600/60 text-white cursor-not-allowed opacity-90'
                         : 'bg-sky-600 hover:bg-sky-700 text-white disabled:opacity-50'
                     }`}
@@ -1144,12 +1275,12 @@ export default function SchedulesClient() {
                     {submitting ? (
                       <>
                         <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                        <span>Assigning & Activating...</span>
+                        <span>{editingScheduleId ? 'Saving Changes...' : 'Assigning & Activating...'}</span>
                       </>
-                    ) : isSelectedCourseOngoing ? (
+                    ) : !editingScheduleId && isSelectedCourseOngoing ? (
                       <span>Course Ongoing — Next Batch Blocked</span>
                     ) : (
-                      <span>Assign Course & Start Progress</span>
+                      <span>{editingScheduleId ? 'Save Schedule Changes' : 'Assign Course & Start Progress'}</span>
                     )}
                   </button>
                 </div>

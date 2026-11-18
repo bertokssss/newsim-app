@@ -3,7 +3,9 @@ import { supabaseAdmin, processScheduleAutomaticTransitions, createNotificationR
 import {
   applyCenterFilter,
   computeEndDate,
+  findScheduleConflict,
   formatSchedule,
+  getCourseTotalDays,
   isAdminContext,
   isFullModularCourseRow,
   parseClockToIso,
@@ -362,12 +364,8 @@ export async function POST(request: NextRequest) {
     const centerId = course.training_center_id || ctx.centerId;
     const roomName = (room || 'Main Hall').trim();
 
-    // Calculate dates first
-    const durationHours = Number(course.duration_hours || 40);
-    const durationDays = Math.max(1, Math.ceil(durationHours / 8));
-    const theoryDays = Number(course.theory_days ?? (durationDays === 1 ? 1 : Math.max(1, Math.round(durationDays * 0.4))));
-    const practicalDays = Number(course.practical_days ?? (durationDays === 1 ? 0 : Math.max(0, durationDays - theoryDays)));
-    const totalDays = Math.max(1, theoryDays + practicalDays);
+    // Calculate dates first using course theory + practical span
+    const totalDays = getCourseTotalDays(course);
     const calculatedEndDateStr = computeEndDate(date, totalDays);
     const calculatedEndAt = parseClockToIso(calculatedEndDateStr, endTime);
 
@@ -435,45 +433,16 @@ export async function POST(request: NextRequest) {
 
     if (schedError) throw schedError;
 
-    for (const existing of (existingSchedules || [])) {
-      if (!existing.start_at || !existing.end_at) continue;
-      const exStartMs = new Date(existing.start_at).getTime();
-      const exEndMs = new Date(existing.end_at).getTime();
+    const conflictMsg = findScheduleConflict({
+      startAt,
+      endAt: calculatedEndAt,
+      room: roomName,
+      instructorId: cleanInstructorId,
+      existingSchedules: existingSchedules || [],
+    });
 
-      // Interval overlap condition: (StartA < EndB) and (EndA > StartB) across full multi-day course span
-      const effectiveEndAtMs = new Date(calculatedEndAt).getTime() || endAtMs;
-      const overlaps = startAtMs < exEndMs && effectiveEndAtMs > exStartMs;
-      if (!overlaps) continue;
-
-      const courseRel = Array.isArray(existing.courses) ? existing.courses[0] : existing.courses;
-      const courseLabel = courseRel?.code ? `${courseRel.code} - ${courseRel.name || ''}` : courseRel?.name || 'Session';
-      const timeLabel = `${new Date(existing.start_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })} to ${new Date(existing.end_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}`;
-
-      // 1. Room Conflict Detection
-      if (existing.room && existing.room.toLowerCase().trim() === roomName.toLowerCase()) {
-        return NextResponse.json(
-          {
-            success: false,
-            error: `Classroom Conflict: "${roomName}" is already booked for ${courseLabel} from ${timeLabel}. Please choose another room or timeframe.`,
-          },
-          { status: 409 }
-        );
-      }
-
-      // 2. Instructor Conflict Detection
-      if (cleanInstructorId && existing.instructor_id && existing.instructor_id === cleanInstructorId) {
-        const insRel = Array.isArray(existing.instructors) ? existing.instructors[0] : existing.instructors;
-        const insProf = Array.isArray(insRel?.profiles) ? insRel.profiles[0] : insRel?.profiles;
-        const insName = insProf ? `${insProf.first_name} ${insProf.last_name}`.trim() : 'Selected instructor';
-
-        return NextResponse.json(
-          {
-            success: false,
-            error: `Instructor Overlap Conflict: ${insName} is already assigned to ${courseLabel} in ${existing.room || 'another room'} from ${timeLabel}.`,
-          },
-          { status: 409 }
-        );
-      }
+    if (conflictMsg) {
+      return NextResponse.json({ success: false, error: conflictMsg }, { status: 409 });
     }
 
     const { data, error } = await supabaseAdmin
