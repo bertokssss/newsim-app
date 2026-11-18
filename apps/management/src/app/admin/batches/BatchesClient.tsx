@@ -531,11 +531,11 @@ export default function BatchesClient() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="relative w-full max-w-lg bg-white dark:bg-[#0c1a2c] border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl overflow-hidden z-10"
+              className="relative w-full max-w-lg max-h-[calc(100dvh-1.5rem)] sm:max-h-[90dvh] flex flex-col bg-white dark:bg-[#0c1a2c] border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl overflow-hidden z-10"
             >
-              <div className="h-1.5 bg-gradient-to-r from-teal-500 to-cyan-500 w-full" />
+              <div className="h-1.5 bg-gradient-to-r from-teal-500 to-cyan-500 w-full shrink-0" />
 
-              <form onSubmit={handleCreateSubmit}>
+              <form onSubmit={handleCreateSubmit} className="overflow-y-auto overscroll-contain flex-1 min-h-0">
                 <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
                   <h3 className="text-base font-extrabold text-slate-900 dark:text-white font-heading">
                     Create New Course Cohort Batch
@@ -712,11 +712,11 @@ export default function BatchesClient() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="relative w-full max-w-lg bg-white dark:bg-[#0c1a2c] border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl overflow-hidden z-10"
+              className="relative w-full max-w-lg max-h-[calc(100dvh-1.5rem)] sm:max-h-[90dvh] flex flex-col bg-white dark:bg-[#0c1a2c] border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl overflow-hidden z-10"
             >
-              <div className="h-1.5 bg-gradient-to-r from-teal-500 to-cyan-500 w-full" />
+              <div className="h-1.5 bg-gradient-to-r from-teal-500 to-cyan-500 w-full shrink-0" />
 
-              <form onSubmit={handleEditSubmit}>
+              <form onSubmit={handleEditSubmit} className="overflow-y-auto overscroll-contain flex-1 min-h-0">
                 <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
                   <div>
                     <h3 className="text-base font-extrabold text-slate-900 dark:text-white font-heading">

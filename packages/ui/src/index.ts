@@ -37,3 +37,4 @@ export * from './two-factor-auth-card';
 export * from './user-avatar';
 export * from './header-clock';
 export * from './portal-client-cache';
+export * from './modal-shell';

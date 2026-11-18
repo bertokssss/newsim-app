@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 import {
   ShieldCheck,
   CheckCircle2,
@@ -20,7 +19,7 @@ import {
   Ban,
   AlertTriangle,
 } from 'lucide-react';
-import { CardGridSkeleton, UserAvatar } from '@newsim/ui';
+import { CardGridSkeleton, UserAvatar, ResponsiveModal } from '@newsim/ui';
 
 function buildClaimSlipPrintHtml(cert: any): string {
   const isRevoked = Boolean(cert.isRevoked) || (cert.status || '').toUpperCase() === 'REVOKED' || (cert.status || '').toUpperCase().includes('REVOKED');
@@ -854,62 +853,54 @@ export default function CertificatesClient() {
       )}
 
       {/* Official Printable Maritime Certificate Claim Slip Modal */}
-      <AnimatePresence>
-        {selectedCert && (() => {
-          const isSelectedCertRevoked = Boolean(selectedCert.isRevoked) || (selectedCert.status || '').toUpperCase().includes('REVOKED');
-          const isSelectedCertClaimed = !isSelectedCertRevoked && (Boolean(selectedCert.isClaimed) || (selectedCert.status || '').toUpperCase().includes('CLAIMED'));
-          return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setSelectedCert(null)}
-              className="fixed inset-0 bg-black/75 backdrop-blur-sm print:hidden"
-            />
-
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              transition={{ duration: 0.2 }}
-              className="relative w-full max-w-3xl bg-white dark:bg-[#0c1a2c] border border-slate-200/80 dark:border-slate-800 rounded-3xl shadow-2xl overflow-hidden z-10 flex flex-col max-h-[94vh] print:max-h-none print:shadow-none print:border-none print:static print:w-full print:p-0"
-            >
-              {/* Top Accent Bar */}
-              <div className={`h-1.5 w-full shrink-0 print:hidden ${isSelectedCertRevoked ? 'bg-red-600' : isSelectedCertClaimed ? 'bg-emerald-500' : 'bg-sky-500'}`} />
-
-              {/* Action Toolbar Header (Single Close Button - Duplicate Print Button Removed) */}
-              <div className="px-6 py-3.5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0 bg-slate-50/90 dark:bg-slate-900/60 print:hidden">
-                <div className="flex items-center gap-2">
-                  <Building2 className="w-4 h-4 text-sky-500" />
-                  <span className="font-mono text-xs font-bold text-slate-800 dark:text-[#CBD5E1]">
-                    Official Maritime Certificate Claim &amp; Release Slip
-                  </span>
-                  {isSelectedCertRevoked ? (
-                    <span className="hidden sm:inline-block px-2 py-0.5 rounded text-[10px] font-mono bg-red-500/15 text-red-700 dark:text-red-400 border border-red-500/30 font-extrabold">
-                      REVOKED — VOID
+      {(() => {
+        const isSelectedCertRevoked = Boolean(selectedCert?.isRevoked) || (selectedCert?.status || '').toUpperCase().includes('REVOKED');
+        const isSelectedCertClaimed = Boolean(selectedCert) && !isSelectedCertRevoked && (Boolean(selectedCert?.isClaimed) || (selectedCert?.status || '').toUpperCase().includes('CLAIMED'));
+        return (
+          <ResponsiveModal
+            isOpen={Boolean(selectedCert)}
+            onClose={() => setSelectedCert(null)}
+            maxWidthClassName="max-w-3xl"
+            backdropClassName="bg-black/75 backdrop-blur-sm print:hidden"
+            panelClassName="sm:max-h-[94dvh] print:max-h-none print:shadow-none print:border-none print:static print:w-full print:p-0"
+            topAccentClassName={`h-1.5 print:hidden ${isSelectedCertRevoked ? 'bg-red-600' : isSelectedCertClaimed ? 'bg-emerald-500' : 'bg-sky-500'}`}
+          >
+            {selectedCert && (
+              <div className="flex flex-col flex-1 min-h-0">
+                {/* Action Toolbar Header */}
+                <div className="px-4 sm:px-6 py-3.5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2 shrink-0 bg-slate-50/90 dark:bg-slate-900/60 print:hidden">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Building2 className="w-4 h-4 text-sky-500 shrink-0" />
+                    <span className="font-mono text-xs font-bold text-slate-800 dark:text-[#CBD5E1] truncate">
+                      Official Maritime Certificate Claim &amp; Release Slip
                     </span>
-                  ) : isSelectedCertClaimed ? (
-                    <span className="hidden sm:inline-block px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 font-bold">
-                      CLAIMED &amp; RELEASED
-                    </span>
-                  ) : (
-                    <span className="hidden sm:inline-block px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-bold">
-                      READY FOR CLAIM
-                    </span>
-                  )}
+                    {isSelectedCertRevoked ? (
+                      <span className="hidden sm:inline-block px-2 py-0.5 rounded text-[10px] font-mono bg-red-500/15 text-red-700 dark:text-red-400 border border-red-500/30 font-extrabold shrink-0">
+                        REVOKED — VOID
+                      </span>
+                    ) : isSelectedCertClaimed ? (
+                      <span className="hidden sm:inline-block px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 font-bold shrink-0">
+                        CLAIMED &amp; RELEASED
+                      </span>
+                    ) : (
+                      <span className="hidden sm:inline-block px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-bold shrink-0">
+                        READY FOR CLAIM
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCert(null)}
+                    className="p-1.5 rounded-xl text-slate-400 hover:text-slate-900 dark:hover:text-white cursor-pointer transition-colors shrink-0"
+                    title="Close modal"
+                    aria-label="Close claim slip"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
                 </div>
-                <button
-                  onClick={() => setSelectedCert(null)}
-                  className="p-1.5 rounded-xl text-slate-400 hover:text-slate-900 dark:hover:text-white cursor-pointer transition-colors"
-                  title="Close modal"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
 
-              {/* Authentic Physical Claim Slip Document Body */}
-              <div className="p-4 sm:p-6 overflow-y-auto space-y-4 bg-slate-100/70 dark:bg-slate-900/60 text-slate-900 print:p-0 print:bg-white">
+                {/* Authentic Physical Claim Slip Document Body */}
+                <div className="p-3.5 sm:p-6 overflow-y-auto overscroll-contain flex-1 min-h-0 space-y-4 bg-slate-100/70 dark:bg-slate-900/60 text-slate-900 print:p-0 print:bg-white">
                 <div
                   id="printable-claim-slip"
                   className="bg-white border-2 border-[#0B3D91] rounded-2xl shadow-sm p-6 sm:p-8 space-y-5 text-slate-900 print:border-2 print:border-[#0B3D91] print:shadow-none print:rounded-none"
@@ -1153,154 +1144,141 @@ export default function CertificatesClient() {
                 </div>
               </div>
 
-              {/* Bottom Footer Actions (Single Print Claim Slip Button - Clean & Non-redundant) */}
-              <div className="px-6 py-4 bg-slate-50 dark:bg-slate-900/60 border-t border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0 print:hidden">
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-xs font-bold text-slate-600 dark:text-slate-300">
-                    {selectedCert.certificateNo}
-                  </span>
-                  <span className="text-[11px] font-mono text-slate-400">
-                    {isSelectedCertRevoked ? '• Claim Slip Void (Revoked)' : isSelectedCertClaimed ? '• Claimed & Released' : '• Ready for In-Person Releasing'}
-                  </span>
-                </div>
-                <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
-                  <button
-                    onClick={() => setSelectedCert(null)}
-                    className="px-4 py-2.5 rounded-xl bg-slate-200 dark:bg-white/10 hover:bg-slate-300 dark:hover:bg-white/15 text-slate-700 dark:text-slate-200 font-bold text-xs transition-colors cursor-pointer"
-                  >
-                    Close
-                  </button>
-                  {isSelectedCertRevoked ? (
+                {/* Bottom Footer Actions */}
+                <div className="px-4 sm:px-6 py-4 bg-slate-50 dark:bg-slate-900/60 border-t border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0 print:hidden">
+                  <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
+                    <span className="font-mono text-xs font-bold text-slate-600 dark:text-slate-300">
+                      {selectedCert.certificateNo}
+                    </span>
+                    <span className="text-[11px] font-mono text-slate-400">
+                      {isSelectedCertRevoked ? '• Claim Slip Void (Revoked)' : isSelectedCertClaimed ? '• Claimed & Released' : '• Ready for In-Person Releasing'}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 sm:gap-3 w-full sm:w-auto justify-end">
                     <button
                       type="button"
-                      disabled
-                      aria-disabled="true"
-                      className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-red-600 text-white font-bold text-xs shadow-none cursor-not-allowed opacity-90 select-none"
+                      onClick={() => setSelectedCert(null)}
+                      className="px-4 py-2.5 rounded-xl bg-slate-200 dark:bg-white/10 hover:bg-slate-300 dark:hover:bg-white/15 text-slate-700 dark:text-slate-200 font-bold text-xs transition-colors cursor-pointer"
                     >
-                      <Ban className="w-4 h-4" />
-                      <span>Claim Slip Revoked</span>
+                      Close
                     </button>
-                  ) : (
-                    <>
-                      {!isSelectedCertClaimed && (
-                        <button
-                          onClick={() => handleMarkClaimed(selectedCert.id)}
-                          disabled={claimingId === selectedCert.id}
-                          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md shadow-emerald-500/20 transition-all cursor-pointer disabled:opacity-50"
-                        >
-                          <CheckCircle2 className="w-4 h-4" />
-                          <span>{claimingId === selectedCert.id ? 'Claiming...' : 'Mark Certificate Claimed'}</span>
-                        </button>
-                      )}
-                      {isSelectedCertClaimed && (
-                        <span className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 text-xs font-bold font-mono">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                          <span>✓ Certificate Claimed</span>
-                        </span>
-                      )}
+                    {isSelectedCertRevoked ? (
                       <button
-                        onClick={handlePrintSlip}
-                        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 hover:opacity-95 text-white font-bold text-xs shadow-md shadow-sky-500/20 transition-all cursor-pointer"
+                        type="button"
+                        disabled
+                        aria-disabled="true"
+                        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-red-600 text-white font-bold text-xs shadow-none cursor-not-allowed opacity-90 select-none"
                       >
-                        <Printer className="w-4 h-4" />
-                        <span>Print Claim Slip</span>
+                        <Ban className="w-4 h-4" />
+                        <span>Claim Slip Revoked</span>
                       </button>
-                    </>
-                  )}
+                    ) : (
+                      <>
+                        {!isSelectedCertClaimed && (
+                          <button
+                            type="button"
+                            onClick={() => handleMarkClaimed(selectedCert.id)}
+                            disabled={claimingId === selectedCert.id}
+                            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md shadow-emerald-500/20 transition-all cursor-pointer disabled:opacity-50"
+                          >
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>{claimingId === selectedCert.id ? 'Claiming...' : 'Mark Certificate Claimed'}</span>
+                          </button>
+                        )}
+                        {isSelectedCertClaimed && (
+                          <span className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 text-xs font-bold font-mono">
+                            <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                            <span>✓ Certificate Claimed</span>
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={handlePrintSlip}
+                          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 hover:opacity-95 text-white font-bold text-xs shadow-md shadow-sky-500/20 transition-all cursor-pointer"
+                        >
+                          <Printer className="w-4 h-4" />
+                          <span>Print Claim Slip</span>
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
-            </motion.div>
-          </div>
-          );
-        })()}
-      </AnimatePresence>
+            )}
+          </ResponsiveModal>
+        );
+      })()}
 
       {/* Verify Certificate ID Modal */}
-      <AnimatePresence>
-        {verifyModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+      <ResponsiveModal
+        isOpen={verifyModalOpen}
+        onClose={() => setVerifyModalOpen(false)}
+        maxWidthClassName="max-w-md"
+        topAccentClassName="h-1 bg-sky-500"
+      >
+        <form onSubmit={handleVerify} className="flex flex-col flex-1 min-h-0">
+          <div className="p-4 sm:p-6 border-b border-slate-200/80 dark:border-slate-800 flex items-center justify-between gap-3 shrink-0">
+            <h3 className="text-base font-extrabold text-slate-900 dark:text-[#F8FAFC] font-heading">
+              Verify Certificate Authenticity
+            </h3>
+            <button
+              type="button"
               onClick={() => setVerifyModalOpen(false)}
-              className="fixed inset-0 bg-black/60 backdrop-blur-sm"
-            />
-
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              transition={{ duration: 0.2 }}
-              className="relative w-full max-w-md bg-white dark:bg-[#0c1a2c] border border-slate-200/80 dark:border-slate-800 rounded-3xl shadow-2xl overflow-hidden z-10"
+              className="p-1.5 rounded-xl text-slate-400 hover:text-slate-900 dark:hover:text-white cursor-pointer shrink-0"
+              aria-label="Close certificate verification"
             >
-              <div className="h-1 bg-sky-500 w-full" />
-
-              <form onSubmit={handleVerify}>
-                <div className="p-6 border-b border-slate-200/80 dark:border-slate-800 flex items-center justify-between">
-                  <h3 className="text-base font-extrabold text-slate-900 dark:text-[#F8FAFC] font-heading">
-                    Verify Certificate Authenticity
-                  </h3>
-                  <button
-                    type="button"
-                    onClick={() => setVerifyModalOpen(false)}
-                    className="p-1.5 rounded-xl text-slate-400 hover:text-slate-900 dark:hover:text-white cursor-pointer"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-
-                <div className="p-6 space-y-4 text-xs">
-                  <div className="space-y-1.5">
-                    <label className="font-bold text-slate-900 dark:text-[#F8FAFC] font-heading uppercase text-[10px]">
-                      Certificate Number or QR Code
-                    </label>
-                    <input
-                      type="text"
-                      value={verifyCode}
-                      onChange={(e) => setVerifyCode(e.target.value)}
-                      placeholder="e.g. NEWSIM-CERT-2026-000124"
-                      required
-                      className="w-full px-3 py-2.5 rounded-xl bg-white dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 text-black dark:text-[#F8FAFC] font-mono placeholder:text-slate-400 outline-none focus:border-sky-500"
-                    />
-                  </div>
-
-                  {verifyResult && (
-                    <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-300 space-y-2 animate-in zoom-in-95 duration-150">
-                      <div className="flex items-center gap-2 font-bold font-mono">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                        <span>AUTHENTIC IMO CREDENTIAL</span>
-                      </div>
-                      <div className="text-xs font-sans text-slate-800 dark:text-slate-200">
-                        <div><strong>Bearer:</strong> {verifyResult.certificate?.traineeName}</div>
-                        <div><strong>Course:</strong> {verifyResult.certificate?.courseTitle}</div>
-                        <div><strong>Status:</strong> {verifyResult.certificate?.status} (Valid)</div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <div className="p-4 bg-slate-50 dark:bg-slate-900/60 border-t border-slate-200/80 dark:border-slate-800 flex items-center justify-end gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setVerifyModalOpen(false)}
-                    className="px-4 py-2 rounded-xl text-slate-600 dark:text-[#CBD5E1] text-xs font-semibold cursor-pointer"
-                  >
-                    Close
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={verifying || !verifyCode.trim()}
-                    className="px-5 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 hover:opacity-95 text-white font-bold text-xs shadow-md shadow-sky-500/20 disabled:opacity-40 cursor-pointer"
-                  >
-                    {verifying ? 'Verifying...' : 'Validate Code'}
-                  </button>
-                </div>
-              </form>
-            </motion.div>
+              <X className="w-5 h-5" />
+            </button>
           </div>
-        )}
-      </AnimatePresence>
+
+          <div className="p-4 sm:p-6 space-y-4 text-xs overflow-y-auto overscroll-contain flex-1 min-h-0">
+            <div className="space-y-1.5">
+              <label className="font-bold text-slate-900 dark:text-[#F8FAFC] font-heading uppercase text-[10px]">
+                Certificate Number or QR Code
+              </label>
+              <input
+                type="text"
+                value={verifyCode}
+                onChange={(e) => setVerifyCode(e.target.value)}
+                placeholder="e.g. NEWSIM-CERT-2026-000124"
+                required
+                className="w-full px-3 py-2.5 rounded-xl bg-white dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 text-black dark:text-[#F8FAFC] font-mono placeholder:text-slate-400 outline-none focus:border-sky-500"
+              />
+            </div>
+
+            {verifyResult && (
+              <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-300 space-y-2 animate-in zoom-in-95 duration-150">
+                <div className="flex items-center gap-2 font-bold font-mono">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                  <span>AUTHENTIC IMO CREDENTIAL</span>
+                </div>
+                <div className="text-xs font-sans text-slate-800 dark:text-slate-200">
+                  <div><strong>Bearer:</strong> {verifyResult.certificate?.traineeName}</div>
+                  <div><strong>Course:</strong> {verifyResult.certificate?.courseTitle}</div>
+                  <div><strong>Status:</strong> {verifyResult.certificate?.status} (Valid)</div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="p-4 bg-slate-50 dark:bg-slate-900/60 border-t border-slate-200/80 dark:border-slate-800 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 sm:gap-3 shrink-0">
+            <button
+              type="button"
+              onClick={() => setVerifyModalOpen(false)}
+              className="px-4 py-2 rounded-xl text-slate-600 dark:text-[#CBD5E1] text-xs font-semibold cursor-pointer text-center"
+            >
+              Close
+            </button>
+            <button
+              type="submit"
+              disabled={verifying || !verifyCode.trim()}
+              className="px-5 py-2.5 sm:py-2 rounded-xl bg-sky-600 hover:bg-sky-700 hover:opacity-95 text-white font-bold text-xs shadow-md shadow-sky-500/20 disabled:opacity-40 cursor-pointer"
+            >
+              {verifying ? 'Verifying...' : 'Validate Code'}
+            </button>
+          </div>
+        </form>
+      </ResponsiveModal>
     </div>
   );
 }

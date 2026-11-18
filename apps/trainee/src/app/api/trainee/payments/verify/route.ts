@@ -13,10 +13,18 @@ export async function GET(req: NextRequest) {
     const traineeId = auth.user.id;
 
     const { searchParams } = new URL(req.url);
-    const sessionId = searchParams.get('sessionId') || searchParams.get('session_id');
-    const enrollmentId = searchParams.get('enrollmentId') || searchParams.get('enrollment_id');
+    const rawSessionId = searchParams.get('sessionId') || searchParams.get('session_id') || '';
+    const enrollmentId = searchParams.get('enrollmentId') || searchParams.get('enrollment_id') || '';
 
-    if (!sessionId && !enrollmentId) {
+    // PayMongo does not substitute Stripe-style `{CHECKOUT_SESSION_ID}` placeholders
+    const validSessionId =
+      rawSessionId &&
+      !rawSessionId.includes('{') &&
+      !rawSessionId.includes('CHECKOUT_SESSION_ID')
+        ? rawSessionId
+        : '';
+
+    if (!validSessionId && !enrollmentId) {
       return NextResponse.json({ success: false, error: 'Session ID or Enrollment ID is required' }, { status: 400 });
     }
 
@@ -29,8 +37,7 @@ export async function GET(req: NextRequest) {
     }
     const authHeader = 'Basic ' + Buffer.from(secretKey + ':').toString('base64');
 
-    // Find the payment record with full enrollment, batch, course, and package details
-    let paymentQuery = supabaseAdmin.from('payments').select(`
+    const baseSelect = `
       *,
       enrollments (
         id,
@@ -41,17 +48,37 @@ export async function GET(req: NextRequest) {
         courses (id, code, name),
         course_packages (id, package_code, name)
       )
-    `);
-    // Enforce ownership: Trainees can only inspect their own payment and receipt records
-    paymentQuery = paymentQuery.eq('trainee_id', traineeId);
+    `;
 
-    if (sessionId) {
-      paymentQuery = paymentQuery.eq('paymongo_checkout_id', sessionId);
-    } else if (enrollmentId) {
-      paymentQuery = paymentQuery.eq('enrollment_id', enrollmentId);
+    // Find the payment record with full enrollment, batch, course, and package details
+    let payment: any = null;
+    let pErr: any = null;
+
+    if (validSessionId) {
+      const res = await supabaseAdmin
+        .from('payments')
+        .select(baseSelect)
+        .eq('trainee_id', traineeId)
+        .eq('paymongo_checkout_id', validSessionId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      payment = res.data;
+      pErr = res.error;
     }
 
-    const { data: payment, error: pErr } = await paymentQuery.maybeSingle();
+    if (!payment && enrollmentId) {
+      const res = await supabaseAdmin
+        .from('payments')
+        .select(baseSelect)
+        .eq('trainee_id', traineeId)
+        .eq('enrollment_id', enrollmentId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      payment = res.data;
+      pErr = res.error;
+    }
 
     if (pErr || !payment) {
       return NextResponse.json({ success: false, error: 'Payment record not found' }, { status: 404 });
@@ -93,8 +120,8 @@ export async function GET(req: NextRequest) {
           title: course.name || pkg.name || 'Maritime Training Program',
           code: course.code || 'STCW',
           batchCode: batch.batch_code || 'Cohort',
-          startDate: batch.start_date || '',
-          endDate: batch.end_date || '',
+          startDate: '',
+          endDate: '',
           centerName: 'NEWSIM Maritime Training Center',
         },
         notice: 'Your payment is on-going. Please wait for admin verification to proceed.',
@@ -117,7 +144,7 @@ export async function GET(req: NextRequest) {
     }
 
     // Query PayMongo API for the checkout session status
-    const targetSessionId = sessionId || payment.paymongo_checkout_id;
+    const targetSessionId = validSessionId || payment.paymongo_checkout_id;
     if (!targetSessionId) {
       return NextResponse.json({ success: false, error: 'No PayMongo session ID found on payment record' }, { status: 400 });
     }

@@ -5,7 +5,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import { Sidebar } from '@/components/super-admin/Sidebar';
 import { Header } from '@/components/super-admin/Header';
 import { GlobalSearchModal } from '@/components/super-admin/GlobalSearchModal';
-import { NotificationToaster, PortalAccessGuard, fetchCachedAuthMe, invalidateAuthMeCache } from '@newsim/ui';
+import { NotificationToaster, PortalAccessGuard, fetchCachedAuthMe, invalidateAuthMeCache, useGlobalModalState } from '@newsim/ui';
 
 export default function SuperAdminLayout({ children }: { children: React.ReactNode }) {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -17,6 +17,14 @@ export default function SuperAdminLayout({ children }: { children: React.ReactNo
   const [userRole, setUserRole] = useState<string | null>(null);
   const router = useRouter();
   const pathname = usePathname();
+  const hasActiveModal = useGlobalModalState();
+
+  useEffect(() => {
+    if (hasActiveModal) {
+      setSidebarExpanded(false);
+      setMobileSidebarOpen(false);
+    }
+  }, [hasActiveModal]);
 
   // Session & RBAC validation (single-flight + 60s cached across routes; forced on explicit updates)
   useEffect(() => {
@@ -83,10 +91,11 @@ export default function SuperAdminLayout({ children }: { children: React.ReactNo
   }, []);
 
   return (
-    <div className="min-h-screen bg-slate-50/60 dark:bg-[#08101E] text-foreground flex flex-col antialiased selection:bg-sky-500 selection:text-white overflow-x-hidden transition-colors duration-200 relative">
+    <div className="min-h-screen bg-slate-50/60 dark:bg-[#08101E] text-foreground flex flex-col antialiased selection:bg-sky-500 selection:text-white overflow-x-hidden transition-colors duration-200 relative isolate">
       {/* Subtle enterprise ambient wash (GPU-light radial gradient) */}
       <div
-        className="fixed inset-0 pointer-events-none z-0"
+        data-ambient-bg="true"
+        className="fixed inset-0 pointer-events-none -z-10"
         style={{
           backgroundImage:
             'radial-gradient(60% 40% at 100% 0%, rgba(14, 165, 233, 0.045), transparent), radial-gradient(50% 40% at 0% 100%, rgba(99, 102, 241, 0.035), transparent)',
@@ -94,22 +103,30 @@ export default function SuperAdminLayout({ children }: { children: React.ReactNo
       />
 
       {/* Super Admin Animated Expanding Sidebar */}
-      <Sidebar
-        mobileOpen={mobileSidebarOpen}
-        onMobileClose={() => setMobileSidebarOpen(false)}
-        open={sidebarExpanded}
-        setOpen={setSidebarExpanded}
-        unreadCount={unreadCount}
-        permissions={permissions}
-        userRole={userRole}
-      />
+      <div
+        inert={hasActiveModal || undefined}
+        aria-hidden={hasActiveModal || undefined}
+        className={hasActiveModal ? 'pointer-events-none select-none' : undefined}
+      >
+        <Sidebar
+          mobileOpen={hasActiveModal ? false : mobileSidebarOpen}
+          onMobileClose={() => setMobileSidebarOpen(false)}
+          open={hasActiveModal ? false : sidebarExpanded}
+          setOpen={(next) => {
+            if (!hasActiveModal) setSidebarExpanded(next);
+          }}
+          unreadCount={unreadCount}
+          permissions={permissions}
+          userRole={userRole}
+        />
+      </div>
 
       {/* Main Workspace: CSS-transitioned shift in sync with the sidebar animation */}
       <div
         style={{
-          paddingLeft: isDesktop ? (sidebarExpanded ? '280px' : '72px') : '0px',
+          paddingLeft: isDesktop ? ((hasActiveModal ? false : sidebarExpanded) ? '280px' : '72px') : '0px',
         }}
-        className="flex-1 flex flex-col min-w-0 w-full relative z-10 transition-[padding] duration-200 ease-out"
+        className="flex-1 flex flex-col min-w-0 w-full transition-[padding] duration-200 ease-out"
       >
         {/* Top Command Bar */}
         <Header

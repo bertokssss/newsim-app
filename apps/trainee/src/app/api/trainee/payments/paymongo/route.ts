@@ -101,7 +101,7 @@ export async function POST(req: NextRequest) {
           show_description: true,
           show_line_items: true,
           description: `NEWSIM Maritime Training Course Tuition (TEST MODE) - ${enrollment.batches?.batch_code || 'Cohort'}`,
-          success_url: `${baseUrl}/payments/success?session_id={CHECKOUT_SESSION_ID}&enrollment_id=${enrollmentId}`,
+          success_url: `${baseUrl}/payments/success?enrollment_id=${enrollmentId}`,
           cancel_url: `${baseUrl}/payments/failed?enrollment_id=${enrollmentId}`,
           metadata: {
             enrollment_id: enrollmentId,

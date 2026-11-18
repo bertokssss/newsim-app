@@ -421,6 +421,32 @@ export async function getAvailablePackages() {
 }
 
 /**
+ * Looks up active Admin-assigned schedules from `schedules` (never pre-seeded batch dates).
+ */
+async function fetchAdminSchedulesByCourseIdMap(courseIds: string[]) {
+  const uniqueIds = Array.from(new Set(courseIds.filter(Boolean)));
+  const map = new Map<string, { startDate: string; endDate: string }>();
+  if (uniqueIds.length === 0) return map;
+
+  const { data: schedRows } = await supabaseAdmin
+    .from('schedules')
+    .select('course_id, start_at, end_at, status')
+    .in('course_id', uniqueIds)
+    .neq('status', 'CANCELLED')
+    .order('start_at', { ascending: false });
+
+  (schedRows || []).forEach((s: any) => {
+    if (s.course_id && s.start_at && !map.has(s.course_id)) {
+      const startStr = formatManilaDate(s.start_at);
+      const endStr = s.end_at ? formatManilaDate(s.end_at) : startStr;
+      map.set(s.course_id, { startDate: startStr, endDate: endStr });
+    }
+  });
+
+  return map;
+}
+
+/**
  * Trainee Enrollments (includes batch, course, package, and payment details)
  */
 export async function getTraineeEnrollmentsList(traineeId: string) {
@@ -556,6 +582,12 @@ export async function getTraineeEnrollmentsList(traineeId: string) {
     })
   );
 
+  const enrolledCourseIds = rawEnrollments
+    .filter((e: any) => ['ENROLLED', 'ACTIVE', 'APPROVED', 'COMPLETED'].includes((e.status || '').toUpperCase()))
+    .map((e: any) => e.course_id)
+    .filter(Boolean);
+  const adminScheduleByCourse = await fetchAdminSchedulesByCourseIdMap(enrolledCourseIds);
+
   const profile = profileRes.data;
   const trainee = traineeRes.data;
   const traineeDetails = {
@@ -578,6 +610,7 @@ export async function getTraineeEnrollmentsList(traineeId: string) {
 
     const isPaid = latestPayment?.status === 'PAID' || latestPayment?.status === 'VERIFIED';
     const isEnrolled = ['ENROLLED', 'ACTIVE', 'APPROVED', 'COMPLETED'].includes((enr.status || '').toUpperCase());
+    const assignedSched = isEnrolled ? adminScheduleByCourse.get(enr.course_id) : undefined;
 
     let paymentStatus = 'PENDING';
     if (isPaid) paymentStatus = 'VERIFIED';
@@ -587,8 +620,8 @@ export async function getTraineeEnrollmentsList(traineeId: string) {
     // Package / Course Access Lifecycle States (Part 4)
     // - PENDING_PAYMENT: Tuition payment not settled or verified
     // - PENDING_REVIEW: Payment settled, awaiting registrar/admin enrollment verification
-    // - PENDING_START: Paid and enrolled, but batch start date is in the future
-    // - READY_TO_START: Batch start date reached and course is ready for first activity
+    // - PENDING_START: Paid and enrolled, but admin-scheduled start date is in the future
+    // - READY_TO_START: Course is ready for first activity
     // - IN_PROGRESS: Training underway
     // - COMPLETED: Course completion confirmed
     let packageAccessState: 'PENDING_PAYMENT' | 'PENDING_REVIEW' | 'PENDING_START' | 'READY_TO_START' | 'IN_PROGRESS' | 'COMPLETED' = 'PENDING_PAYMENT';
@@ -602,7 +635,7 @@ export async function getTraineeEnrollmentsList(traineeId: string) {
       packageAccessState = 'COMPLETED';
     } else if (['ENROLLED', 'ACTIVE', 'APPROVED'].includes(normalizedStatus)) {
       const nowMs = Date.now();
-      const startMs = batch.start_date ? new Date(batch.start_date).getTime() : 0;
+      const startMs = assignedSched?.startDate ? new Date(assignedSched.startDate).getTime() : 0;
       if (startMs > nowMs) {
         packageAccessState = 'PENDING_START';
       } else if (normalizedStatus === 'ACTIVE') {
@@ -620,8 +653,8 @@ export async function getTraineeEnrollmentsList(traineeId: string) {
       courseTitle: course.name || pkg.name || 'Maritime Course',
       batchId: enr.batch_id,
       batchCode: batch.batch_code || 'TBD',
-      batchStartDate: batch.start_date || '',
-      batchEndDate: batch.end_date || '',
+      batchStartDate: assignedSched?.startDate || '',
+      batchEndDate: assignedSched?.endDate || '',
       batchQueueOrder: batch.queue_order || 1,
       packageId: enr.package_id,
       packageName: pkg.name || null,
@@ -641,8 +674,8 @@ export async function getTraineeEnrollmentsList(traineeId: string) {
       appliedAt: enr.enrolled_at || enr.created_at,
       trainee: traineeDetails,
       ongoingNotice: 'Your payment is on-going. Please wait for admin verification to proceed.',
-      startDate: batch.start_date || '',
-      endDate: batch.end_date || '',
+      startDate: assignedSched?.startDate || '',
+      endDate: assignedSched?.endDate || '',
     };
   });
 }
@@ -1099,7 +1132,7 @@ export async function applyTraineeEnrollment(
     courseTitle: enr.courses?.name || 'Maritime Course',
     batchId: enr.batch_id,
     batchCode: enr.batches?.batch_code,
-    batchStartDate: enr.batches?.start_date,
+    batchStartDate: '',
     centerName: 'NEWSIM Maritime Training Center',
     status: enr.status, // 'PAYMENT_PENDING'
     paymentStatus: 'PENDING',
@@ -2647,6 +2680,12 @@ export async function getTraineePaymentsList(traineeId: string) {
     })
   );
 
+  const approvedCourseIds = rawPayments
+    .filter((p: any) => ['ENROLLED', 'APPROVED', 'ACTIVE', 'COMPLETED'].includes((p.enrollments?.status || '').toUpperCase()))
+    .map((p: any) => p.enrollments?.course_id)
+    .filter(Boolean);
+  const adminScheduleByCourse = await fetchAdminSchedulesByCourseIdMap(approvedCourseIds);
+
   const profile = profileRes.data;
   const trainee = traineeRes.data;
   const traineeDetails = {
@@ -2679,6 +2718,7 @@ export async function getTraineePaymentsList(traineeId: string) {
       paymentStatusUpper === 'VERIFIED' ||
       ['ENROLLED', 'APPROVED', 'ACTIVE', 'COMPLETED'].includes(enrStatusUpper)
     );
+    const assignedSched = isApproved && enr.course_id ? adminScheduleByCourse.get(enr.course_id) : undefined;
 
     const isPendingApproval = !isApproved && (
       paymentStatusUpper === 'PAID' ||
@@ -2695,8 +2735,8 @@ export async function getTraineePaymentsList(traineeId: string) {
       courseTitle: title,
       courseCode: course.code || 'STCW',
       batchCode: batch.batch_code || 'Cohort',
-      batchStartDate: batch.start_date || '',
-      batchEndDate: batch.end_date || '',
+      batchStartDate: assignedSched?.startDate || '',
+      batchEndDate: assignedSched?.endDate || '',
       centerName: 'NEWSIM Maritime Training Center',
       amount: Number(p.amount) || 0,
       method: p.payment_method || 'GCASH',

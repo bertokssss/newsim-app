@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import {
   BookOpen,
   PlayCircle,
@@ -18,7 +18,7 @@ import {
   Search,
   Filter
 } from 'lucide-react';
-import { CardGridSkeleton, UserAvatar } from '@newsim/ui';
+import { CardGridSkeleton, UserAvatar, ResponsiveModal } from '@newsim/ui';
 
 const easeCurve: [number, number, number, number] = [0.22, 1, 0.36, 1];
 
@@ -272,47 +272,37 @@ export default function MyCoursesClient() {
       )}
 
       {/* Course Syllabus Modal */}
-      <AnimatePresence>
+      <ResponsiveModal
+        isOpen={Boolean(selectedCourse)}
+        onClose={() => setSelectedCourse(null)}
+        maxWidthClassName="max-w-2xl"
+        topAccentClassName="h-1 bg-sky-500"
+      >
         {selectedCourse && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setSelectedCourse(null)}
-              className="fixed inset-0 bg-black/60 backdrop-blur-sm"
-            />
-
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              transition={{ duration: 0.2 }}
-              className="relative w-full max-w-2xl max-h-[85vh] bg-white dark:bg-[#0c1a2c] border border-slate-200/80 dark:border-slate-800 rounded-3xl shadow-2xl overflow-hidden z-10 flex flex-col"
-            >
-              <div className="h-1 bg-sky-500 w-full shrink-0" />
-
-              <div className="p-6 border-b border-slate-200/80 dark:border-slate-800 flex items-center justify-between shrink-0">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-xs px-2 py-0.5 rounded bg-sky-500/10 text-sky-700 dark:text-sky-400 font-bold border border-sky-500/20">
-                      {selectedCourse.code}
-                    </span>
-                    <span className="text-xs font-mono text-slate-500">{selectedCourse.category}</span>
-                  </div>
-                  <h2 className="text-lg font-extrabold text-slate-900 dark:text-[#F8FAFC] font-heading mt-1">
-                    {selectedCourse.title}
-                  </h2>
+          <div className="flex flex-col flex-1 min-h-0">
+            <div className="p-4 sm:p-6 border-b border-slate-200/80 dark:border-slate-800 flex items-center justify-between gap-3 shrink-0">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-mono text-xs px-2 py-0.5 rounded bg-sky-500/10 text-sky-700 dark:text-sky-400 font-bold border border-sky-500/20">
+                    {selectedCourse.code}
+                  </span>
+                  <span className="text-xs font-mono text-slate-500">{selectedCourse.category}</span>
                 </div>
-                <button
-                  onClick={() => setSelectedCourse(null)}
-                  className="p-1.5 rounded-xl text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-sky-500/10"
-                >
-                  <X className="w-5 h-5" />
-                </button>
+                <h2 className="text-base sm:text-lg font-extrabold text-slate-900 dark:text-[#F8FAFC] font-heading mt-1">
+                  {selectedCourse.title}
+                </h2>
               </div>
+              <button
+                type="button"
+                onClick={() => setSelectedCourse(null)}
+                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-sky-500/10 cursor-pointer shrink-0"
+                aria-label="Close syllabus"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
 
-              <div className="p-6 overflow-y-auto space-y-6 text-xs">
+            <div className="p-4 sm:p-6 overflow-y-auto overscroll-contain flex-1 min-h-0 space-y-6 text-xs">
                 {/* Description */}
                 <div>
                   <h4 className="font-bold text-slate-900 dark:text-[#F8FAFC] font-heading uppercase text-[11px] mb-1">
@@ -441,24 +431,24 @@ export default function MyCoursesClient() {
                 </div>
               </div>
 
-              <div className="p-4 bg-slate-50 dark:bg-slate-900/60 border-t border-slate-200/80 dark:border-slate-800 flex items-center justify-end gap-3 shrink-0">
+              <div className="p-4 bg-slate-50 dark:bg-slate-900/60 border-t border-slate-200/80 dark:border-slate-800 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 sm:gap-3 shrink-0">
                 <button
+                  type="button"
                   onClick={() => setSelectedCourse(null)}
-                  className="px-4 py-2 rounded-xl text-slate-600 dark:text-[#CBD5E1] hover:bg-sky-500/10 text-xs font-semibold"
+                  className="px-4 py-2 rounded-xl text-slate-600 dark:text-[#CBD5E1] hover:bg-sky-500/10 text-xs font-semibold cursor-pointer text-center"
                 >
                   Close
                 </button>
                 <Link
                   href={`/learning?courseId=${selectedCourse.id}`}
-                  className="px-5 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs shadow-md shadow-sky-500/20"
+                  className="px-5 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs shadow-md shadow-sky-500/20 text-center"
                 >
                   Enter Course Workspace
                 </Link>
               </div>
-            </motion.div>
-          </div>
+            </div>
         )}
-      </AnimatePresence>
+      </ResponsiveModal>
     </div>
   );
 }

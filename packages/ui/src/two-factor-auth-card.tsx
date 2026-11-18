@@ -325,7 +325,7 @@ export function TwoFactorAuthCard({
               initial={{ scale: 0.95, opacity: 0, y: 15 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.95, opacity: 0, y: 15 }}
-              className="relative w-full max-w-md rounded-2xl bg-white dark:bg-[#0c1a2c] border border-slate-200 dark:border-slate-800 p-6 shadow-2xl z-10 text-slate-900 dark:text-slate-100"
+              className="relative w-full max-w-md max-h-[calc(100dvh-1.5rem)] sm:max-h-[90dvh] overflow-y-auto overscroll-contain rounded-2xl bg-white dark:bg-[#0c1a2c] border border-slate-200 dark:border-slate-800 p-5 sm:p-6 shadow-2xl z-10 text-slate-900 dark:text-slate-100"
             >
               <button
                 type="button"
@@ -449,7 +449,7 @@ export function TwoFactorAuthCard({
               initial={{ scale: 0.95, opacity: 0, y: 15 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.95, opacity: 0, y: 15 }}
-              className="relative w-full max-w-md rounded-2xl bg-white dark:bg-[#0c1a2c] border border-slate-200 dark:border-slate-800 p-6 shadow-2xl z-10 text-slate-900 dark:text-slate-100 space-y-4 text-center"
+              className="relative w-full max-w-md max-h-[calc(100dvh-1.5rem)] sm:max-h-[90dvh] overflow-y-auto overscroll-contain rounded-2xl bg-white dark:bg-[#0c1a2c] border border-slate-200 dark:border-slate-800 p-5 sm:p-6 shadow-2xl z-10 text-slate-900 dark:text-slate-100 space-y-4 text-center"
             >
               <button
                 type="button"

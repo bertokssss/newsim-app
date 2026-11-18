@@ -346,11 +346,11 @@ export default function LeaveClient() {
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
               transition={{ duration: 0.2 }}
-              className="relative w-full max-w-lg bg-white dark:bg-[#0c1a2c] border border-slate-200/80 dark:border-slate-800 rounded-3xl shadow-2xl overflow-hidden z-10 flex flex-col"
+              className="relative w-full max-w-lg max-h-[calc(100dvh-1.5rem)] sm:max-h-[90dvh] bg-white dark:bg-[#0c1a2c] border border-slate-200/80 dark:border-slate-800 rounded-3xl shadow-2xl overflow-hidden z-10 flex flex-col"
             >
               <div className="h-1.5 bg-sky-500 w-full shrink-0" />
 
-              <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+              <div className="p-5 sm:p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0">
                 <div>
                   <h3 className="text-lg font-extrabold text-slate-900 dark:text-[#F8FAFC] font-heading">
                     File Leave Request
@@ -368,7 +368,7 @@ export default function LeaveClient() {
                 </button>
               </div>
 
-              <form onSubmit={handleFileLeave} className="p-6 space-y-4 text-xs font-mono">
+              <form onSubmit={handleFileLeave} className="p-5 sm:p-6 space-y-4 text-xs font-mono overflow-y-auto overscroll-contain flex-1 min-h-0">
                 {errorMsg && (
                   <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-600 text-xs flex items-center gap-2">
                     <AlertCircle className="w-4 h-4 shrink-0" />

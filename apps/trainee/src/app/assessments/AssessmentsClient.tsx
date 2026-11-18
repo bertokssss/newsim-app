@@ -525,7 +525,7 @@ export default function AssessmentsClient() {
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
               transition={{ duration: 0.2 }}
-              className="relative w-full max-w-3xl max-h-[92vh] bg-white dark:bg-[#0c1a2c] border border-slate-200/80 dark:border-slate-800 rounded-3xl shadow-2xl overflow-hidden z-10 flex flex-col"
+              className="relative w-full max-w-3xl max-h-[calc(100dvh-1.5rem)] sm:max-h-[92dvh] bg-white dark:bg-[#0c1a2c] border border-slate-200/80 dark:border-slate-800 rounded-3xl shadow-2xl overflow-hidden z-10 flex flex-col"
             >
               <div className="h-1.5 bg-sky-500 w-full shrink-0" />
 
@@ -637,7 +637,7 @@ export default function AssessmentsClient() {
               )}
 
               {/* Modal Body */}
-              <div className="p-4 sm:p-6 overflow-y-auto space-y-5 flex-1">
+              <div className="p-4 sm:p-6 overflow-y-auto overscroll-contain space-y-5 flex-1 min-h-0">
                 {submissionResult ? (
                   /* ========================================================
                      SUBMISSION RESULT VIEW

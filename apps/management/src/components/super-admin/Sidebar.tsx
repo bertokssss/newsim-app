@@ -21,7 +21,7 @@ import {
   X
 } from 'lucide-react';
 import { cn, filterNavGroupsByPermissions } from '@newsim/utils';
-import { UserAvatar, fetchCachedAuthMe } from '@newsim/ui';
+import { UserAvatar, fetchCachedAuthMe, acquireViewportScrollLock } from '@newsim/ui';
 
 interface SidebarProps {
   mobileOpen?: boolean;
@@ -100,14 +100,8 @@ export function Sidebar({
 
   // Lock body scroll when mobile drawer is open (prevents iOS rubber-band background scroll)
   React.useEffect(() => {
-    if (mobileOpen) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = '';
-    }
-    return () => {
-      document.body.style.overflow = '';
-    };
+    if (!mobileOpen) return;
+    return acquireViewportScrollLock();
   }, [mobileOpen]);
 
   React.useEffect(() => {
@@ -212,6 +206,7 @@ export function Sidebar({
       <AnimatePresence>
         {mobileOpen && (
           <motion.div
+            data-sidebar-drawer="true"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -379,7 +374,7 @@ export function Sidebar({
       {/* Mobile Drawer (Accessible on mobile screens) */}
       <AnimatePresence>
         {mobileOpen && (
-          <div className="fixed inset-0 z-50 lg:hidden">
+          <div data-sidebar-drawer="true" className="fixed inset-0 z-50 lg:hidden">
             {/* Backdrop */}
             <motion.div
               initial={{ opacity: 0 }}

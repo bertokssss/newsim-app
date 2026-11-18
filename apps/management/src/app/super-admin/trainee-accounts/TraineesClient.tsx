@@ -543,7 +543,7 @@ export default function TraineesClient() {
       <AnimatePresence>
         {selectedTrainee && (
           <>
-            <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm" onClick={() => setSelectedTrainee(null)} />
+            <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm" onClick={() => setSelectedTrainee(null)} />
             <motion.div
               initial={{ opacity: 0, x: '100%' }}
               animate={{ opacity: 1, x: 0 }}

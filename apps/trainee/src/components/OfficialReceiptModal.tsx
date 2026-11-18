@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { ResponsiveModal } from '@newsim/ui';
 import {
   X,
   Printer,
@@ -435,7 +435,7 @@ export default function OfficialReceiptModal({ isOpen, onClose, receipt }: Props
                 </div>
                 <div class="data-row">
                   <span class="data-label">Training Period:</span>
-                  <span class="data-value">${receipt.course.startDate ? `${receipt.course.startDate} ${receipt.course.endDate ? 'to ' + receipt.course.endDate : ''}` : 'Scheduled Cohort'}</span>
+                  <span class="data-value">${receipt.course.startDate ? `${receipt.course.startDate} ${receipt.course.endDate ? 'to ' + receipt.course.endDate : ''}` : 'Set by Admin'}</span>
                 </div>
                 <div class="data-row">
                   <span class="data-label">Training Campus:</span>
@@ -527,31 +527,17 @@ export default function OfficialReceiptModal({ isOpen, onClose, receipt }: Props
   };
 
   return (
-    <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto print:p-0 print:static print:block">
-        {/* Backdrop */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          onClick={onClose}
-          className="fixed inset-0 bg-black/70 backdrop-blur-sm print:hidden"
-        />
-
-        {/* Modal Window / Printable Area */}
-        <motion.div
-          initial={{ opacity: 0, scale: 0.95, y: 15 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.95, y: 15 }}
-          transition={{ duration: 0.2 }}
-          className="relative w-full max-w-3xl bg-white dark:bg-[#0B2447] text-slate-800 dark:text-slate-100 rounded-3xl shadow-2xl border border-[#3BA7F2]/30 overflow-hidden z-10 my-8 print:border-none print:shadow-none print:rounded-none print:m-0 print:p-0 print:max-w-none print:bg-white print:text-black"
-        >
-          {/* Top Decorative Header */}
-          <div className="h-2 bg-gradient-to-r from-[#0B3D91] via-[#3BA7F2] to-emerald-400 w-full print:hidden" />
-
+    <ResponsiveModal
+      isOpen={isOpen}
+      onClose={onClose}
+      maxWidthClassName="max-w-3xl"
+      backdropClassName="bg-black/70 backdrop-blur-sm print:hidden"
+      panelClassName="bg-white dark:bg-[#0B2447] text-slate-800 dark:text-slate-100 border-[#3BA7F2]/30 sm:max-h-[92dvh] print:max-h-none print:border-none print:shadow-none print:rounded-none print:m-0 print:p-0 print:max-w-none print:bg-white print:text-black"
+      topAccentClassName="h-2 bg-gradient-to-r from-[#0B3D91] via-[#3BA7F2] to-emerald-400 print:hidden"
+    >
           {/* Action Bar (Print / Close) */}
-          <div className="p-4 sm:p-6 pb-0 flex items-center justify-between print:hidden">
-            <div className="flex items-center gap-2">
+          <div className="p-4 sm:p-6 pb-3 border-b border-slate-200/70 dark:border-white/10 flex flex-wrap items-center justify-between gap-2 shrink-0 print:hidden">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-[#3BA7F2]/15 text-[#0B3D91] dark:text-[#3BA7F2] border border-[#3BA7F2]/30 flex items-center gap-1">
                 <Receipt className="w-3 h-3 text-[#3BA7F2]" />
                 <span>OFFICIAL ELECTRONIC RECEIPT</span>
@@ -581,7 +567,7 @@ export default function OfficialReceiptModal({ isOpen, onClose, receipt }: Props
           </div>
 
           {/* Printable Receipt Body */}
-          <div id="official-receipt-print-area" className="p-6 sm:p-8 space-y-5 print:p-0">
+          <div id="official-receipt-print-area" className="p-4 sm:p-8 space-y-5 overflow-y-auto overscroll-contain flex-1 min-h-0 print:overflow-visible print:p-0">
             {/* Outer Border for Official Look */}
             <div className="border-2 sm:border-3 border-double border-[#0B3D91]/40 dark:border-[#3BA7F2]/40 rounded-2xl p-5 sm:p-6 space-y-5 bg-white dark:bg-[#071E3D] print:border-3 print:border-double print:border-black print:bg-white print:p-6">
               
@@ -711,7 +697,7 @@ export default function OfficialReceiptModal({ isOpen, onClose, receipt }: Props
                     <div className="flex justify-between">
                       <span className="text-slate-400">Training Period:</span>
                       <span className="text-slate-700 dark:text-slate-300 print:text-black">
-                        {receipt.course.startDate ? `${receipt.course.startDate} ${receipt.course.endDate ? 'to ' + receipt.course.endDate : ''}` : 'Scheduled Cohort'}
+                        {receipt.course.startDate ? `${receipt.course.startDate} ${receipt.course.endDate ? 'to ' + receipt.course.endDate : ''}` : 'Set by Admin'}
                       </span>
                     </div>
                     <div className="flex justify-between">
@@ -788,23 +774,23 @@ export default function OfficialReceiptModal({ isOpen, onClose, receipt }: Props
           </div>
 
           {/* Modal Footer Controls (Print / Done) */}
-          <div className="p-4 bg-slate-50 dark:bg-white/5 border-t border-slate-200 dark:border-white/10 flex items-center justify-end gap-3 print:hidden">
+          <div className="p-4 bg-slate-50 dark:bg-white/5 border-t border-slate-200 dark:border-white/10 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 sm:gap-3 shrink-0 print:hidden">
             <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 rounded-xl text-slate-500 hover:bg-slate-200 dark:hover:bg-white/10 text-xs font-semibold cursor-pointer transition-colors text-center"
+            >
+              Close
+            </button>
+            <button
+              type="button"
               onClick={handlePrint}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#0B3D91] to-[#3BA7F2] text-white font-bold text-xs shadow-md shadow-[#0B3D91]/25 hover:opacity-95 transition-opacity cursor-pointer"
+              className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#0B3D91] to-[#3BA7F2] text-white font-bold text-xs shadow-md shadow-[#0B3D91]/25 hover:opacity-95 transition-opacity cursor-pointer"
             >
               <Printer className="w-4 h-4" />
               <span>Print Official Receipt</span>
             </button>
-            <button
-              onClick={onClose}
-              className="px-4 py-2 rounded-xl text-slate-500 hover:bg-slate-200 dark:hover:bg-white/10 text-xs font-semibold cursor-pointer transition-colors"
-            >
-              Close
-            </button>
           </div>
-        </motion.div>
-      </div>
-    </AnimatePresence>
+    </ResponsiveModal>
   );
 }

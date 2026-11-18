@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AlertTriangle, AlertCircle, Info, X } from 'lucide-react';
 import { Button } from '../button';
+import { acquireViewportScrollLock } from '../modal-shell';
 
 export interface ConfirmationModalProps {
   isOpen: boolean;
@@ -48,11 +49,10 @@ export function ConfirmationModal({
   useEffect(() => {
     if (isOpen) {
       window.addEventListener('keydown', handleKeyDown);
-      const originalOverflow = document.body.style.overflow;
-      document.body.style.overflow = 'hidden';
+      const releaseLock = acquireViewportScrollLock();
       return () => {
         window.removeEventListener('keydown', handleKeyDown);
-        document.body.style.overflow = originalOverflow;
+        releaseLock();
       };
     }
   }, [isOpen, handleKeyDown]);
@@ -88,7 +88,7 @@ export function ConfirmationModal({
   return createPortal(
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6 overflow-y-auto">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-6 overflow-hidden">
           {/* Backdrop */}
           <motion.div
             initial={{ opacity: 0 }}
@@ -98,7 +98,7 @@ export function ConfirmationModal({
             onClick={() => {
               if (!isLoading) onClose();
             }}
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm"
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm touch-none overscroll-none"
             aria-hidden="true"
           />
 
@@ -112,7 +112,7 @@ export function ConfirmationModal({
             animate={{ scale: 1, opacity: 1, y: 0 }}
             exit={{ scale: 0.95, opacity: 0, y: 15 }}
             transition={{ duration: 0.2 }}
-            className="relative w-full max-w-md rounded-2xl bg-white dark:bg-[#0c1a2c] border border-slate-200/80 dark:border-slate-800 p-6 sm:p-7 shadow-2xl z-10 text-slate-900 dark:text-slate-100 text-center"
+            className="relative w-full max-w-md max-h-[calc(100dvh-1.5rem)] sm:max-h-[calc(100dvh-2.5rem)] overflow-y-auto overscroll-contain rounded-2xl bg-white dark:bg-[#0c1a2c] border border-slate-200/80 dark:border-slate-800 p-5 sm:p-7 shadow-2xl z-10 text-slate-900 dark:text-slate-100 text-center"
           >
             {/* Close Button */}
             <button

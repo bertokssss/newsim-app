@@ -3,9 +3,8 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import { motion, AnimatePresence } from 'framer-motion';
 import type { OfficialReceiptData } from '@/components/OfficialReceiptModal';
-import { trackAnalyticsEvent } from '@newsim/ui';
+import { trackAnalyticsEvent, CardGridSkeleton, ResponsiveModal } from '@newsim/ui';
 
 const OfficialReceiptModal = dynamic(() => import('@/components/OfficialReceiptModal'), { ssr: false });
 import {
@@ -15,7 +14,6 @@ import {
   Building2,
   Calendar,
   CreditCard,
-  PlusCircle,
   X,
   Send,
   AlertCircle,
@@ -33,7 +31,6 @@ import {
   XCircle,
   AlertTriangle,
 } from 'lucide-react';
-import { CardGridSkeleton } from '@newsim/ui';
 
 export default function EnrollmentClient() {
   const [data, setData] = useState<Record<string, unknown> | null>(null);
@@ -290,18 +287,6 @@ export default function EnrollmentClient() {
             Select an IMO/STCW certified batch, submit your seafarer application, and settle tuition via PayMongo (GCash / Maya).
           </p>
         </div>
-
-        <button
-          onClick={() => {
-            if (availableCourses.length > 0) {
-              handleOpenEnrollModal(availableCourses[0].id);
-            }
-          }}
-          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-sky-600 hover:bg-sky-700 hover:opacity-95 text-white font-bold text-xs shadow-md shadow-sky-500/20 transition-all self-start sm:self-auto cursor-pointer"
-        >
-          <PlusCircle className="w-4 h-4" />
-          <span>Apply for New Course</span>
-        </button>
       </div>
 
       {successMessage && (
@@ -384,7 +369,7 @@ export default function EnrollmentClient() {
                     </h4>
                     <div className="text-xs font-mono text-slate-600 dark:text-[#CBD5E1] flex flex-wrap items-center gap-3 pt-0.5">
                       <span>Center: {enr.centerName}</span>
-                      {enr.startDate ? (
+                      {isEnrolled && enr.startDate ? (
                         <span className="flex items-center gap-1 text-sky-600 dark:text-sky-400 font-semibold">
                           <Calendar className="w-3 h-3 text-sky-500" />
                           Schedule: {enr.startDate} {enr.endDate ? `to ${enr.endDate}` : ''}
@@ -400,10 +385,16 @@ export default function EnrollmentClient() {
                       </span>
                     </div>
 
-                    {/* Review Notes if present */}
+                    {/* Review / Classification Notes if present */}
                     {enr.reviewNotes && (
-                      <div className="text-[11px] font-sans text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/30 p-2 rounded-xl border border-rose-500/20 mt-1">
-                        <strong>Registrar Remarks:</strong> {enr.reviewNotes}
+                      <div
+                        className={`text-[11px] font-sans p-2 rounded-xl border mt-1 ${
+                          isRejected
+                            ? 'text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/30 border-rose-500/20'
+                            : 'text-slate-600 dark:text-slate-300 bg-slate-100/80 dark:bg-slate-800/60 border-slate-200/80 dark:border-slate-700'
+                        }`}
+                      >
+                        <strong>{isRejected ? 'Registrar Remarks:' : 'Enrollment Details:'}</strong> {enr.reviewNotes}
                       </div>
                     )}
                   </div>
@@ -725,339 +716,312 @@ export default function EnrollmentClient() {
       </div>
 
       {/* Apply / Batch Selection Modal */}
-      <AnimatePresence>
-        {applyModalOpen && currentSelectedCourse && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setApplyModalOpen(false)}
-              className="fixed inset-0 bg-black/60 backdrop-blur-sm"
-            />
+      <ResponsiveModal
+        isOpen={Boolean(applyModalOpen && currentSelectedCourse)}
+        onClose={() => setApplyModalOpen(false)}
+        disableClose={applying}
+        maxWidthClassName="max-w-lg"
+        topAccentClassName="h-1 bg-sky-500"
+      >
+        {currentSelectedCourse && (recentApplication ? (
+          /* Success screen inside modal */
+          <div className="p-5 sm:p-6 space-y-5 text-center overflow-y-auto overscroll-contain flex-1 min-h-0">
+            <div className="w-16 h-16 rounded-full bg-emerald-500 text-white flex items-center justify-center mx-auto shadow-lg shadow-emerald-500/30">
+              <CheckCircle2 className="w-8 h-8" />
+            </div>
 
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              transition={{ duration: 0.2 }}
-              className="relative w-full max-w-lg bg-white dark:bg-[#0c1a2c] border border-slate-200/80 dark:border-slate-800 rounded-3xl shadow-2xl overflow-hidden z-10"
-            >
-              <div className="h-1 bg-sky-500 w-full" />
+            <div>
+              <h3 className="text-lg font-extrabold text-slate-900 dark:text-[#F8FAFC] font-heading">
+                Seat Reserved in Batch!
+              </h3>
+              <p className="text-xs font-mono text-sky-500 font-bold mt-1">
+                Enrollment Ref: {recentApplication.enrollmentNo}
+              </p>
+              <p className="text-xs text-slate-500 font-mono mt-0.5">
+                Schedule: To be assigned by Admin (No fixed schedule)
+              </p>
+            </div>
 
-              {recentApplication ? (
-                /* Success screen inside modal */
-                <div className="p-6 space-y-5 text-center">
-                  <div className="w-16 h-16 rounded-full bg-emerald-500 text-white flex items-center justify-center mx-auto shadow-lg shadow-emerald-500/30">
-                    <CheckCircle2 className="w-8 h-8" />
-                  </div>
-
-                  <div>
-                    <h3 className="text-lg font-extrabold text-slate-900 dark:text-[#F8FAFC] font-heading">
-                      Seat Reserved in Batch!
-                    </h3>
-                    <p className="text-xs font-mono text-sky-500 font-bold mt-1">
-                      Enrollment Ref: {recentApplication.enrollmentNo}
-                    </p>
-                    <p className="text-xs text-slate-500 font-mono mt-0.5">
-                      Schedule: To be assigned by Admin (No fixed schedule)
-                    </p>
-                  </div>
-
-                  <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 text-xs font-mono text-left space-y-1.5">
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">Course:</span>
-                      <span className="font-bold text-slate-900 dark:text-[#F8FAFC]">{recentApplication.courseTitle}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">Schedule:</span>
-                      <span className="font-bold text-sky-600 dark:text-sky-400">To be set by Admin</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">Tuition Fee:</span>
-                      <span className="font-bold text-emerald-600 dark:text-emerald-400">₱{Number(recentApplication.fee).toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">Status:</span>
-                      <span className="font-bold text-amber-600 dark:text-amber-400">PAYMENT_PENDING</span>
-                    </div>
-                  </div>
-
-                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-left text-[11px] text-amber-700 dark:text-amber-300">
-                    Please settle your tuition via PayMongo to finalize your seat reservation. Your training schedule will be coordinated and assigned by administration upon approval.
-                  </div>
-
-                  <div className="pt-2 flex flex-col sm:flex-row gap-2 justify-center">
-                    <Link
-                      href={`/payments?enrollmentId=${recentApplication.id}`}
-                      className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs shadow-md shadow-sky-500/20"
-                    >
-                      <CreditCard className="w-4 h-4" />
-                      <span>Pay Tuition with PayMongo (GCash / Maya) →</span>
-                    </Link>
-                    <button
-                      type="button"
-                      onClick={() => setApplyModalOpen(false)}
-                      className="px-4 py-2 rounded-xl text-slate-500 hover:bg-slate-100 dark:hover:bg-white/5 text-xs font-semibold cursor-pointer"
-                    >
-                      Done
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div>
-                  <div className="p-6 border-b border-slate-200/80 dark:border-slate-800 flex items-center justify-between">
-                    <div>
-                      <h3 className="text-base font-extrabold text-slate-900 dark:text-[#F8FAFC] font-heading">
-                        Confirm Course Enrollment
-                      </h3>
-                      <p className="text-xs text-sky-500 font-mono mt-0.5">
-                        Please verify your enrollment details before proceeding to payment.
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setApplyModalOpen(false)}
-                      className="p-1.5 rounded-xl text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5 cursor-pointer"
-                    >
-                      <X className="w-5 h-5" />
-                    </button>
-                  </div>
-
-                  <div className="p-6 space-y-4 text-xs font-mono">
-                    {ongoingError && (
-                      <div className="p-4 rounded-2xl bg-rose-500/15 border border-rose-500/30 text-rose-800 dark:text-rose-300 text-xs font-mono space-y-1 mb-4">
-                        <div className="flex items-center gap-2 font-bold">
-                          <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
-                          <span>Ongoing Course Exists</span>
-                        </div>
-                        <p className="text-[11px] font-sans">{ongoingError}</p>
-                      </div>
-                    )}
-
-                    {prereqError && (
-                      <div className="p-4 rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-800 dark:text-amber-300 text-xs font-mono space-y-1">
-                        <div className="flex items-center gap-2 font-bold">
-                          <AlertCircle className="w-4 h-4 shrink-0 text-amber-600" />
-                          <span>Prerequisite Required</span>
-                        </div>
-                        <p className="text-[11px] font-sans">{prereqError}</p>
-                      </div>
-                    )}
-
-                    {errorMessage && (
-                      <div className="p-4 rounded-2xl bg-rose-500/15 border border-rose-500/30 text-rose-700 dark:text-rose-300 text-xs font-mono flex items-center gap-2">
-                        <AlertCircle className="w-4 h-4 shrink-0 text-rose-500" />
-                        <span>{errorMessage}</span>
-                      </div>
-                    )}
-
-                    {(() => {
-                      const selectedPkg = availablePackages.find((p: any) => p.id === selectedPackageId);
-                      const feeAmount = selectedPkg?.package_price ? Number(selectedPkg.package_price) : Number(currentSelectedCourse.fee || currentSelectedCourse.price || 7500);
-
-                      return (
-                        <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 space-y-3">
-                          <div className="flex justify-between border-b border-slate-200 dark:border-slate-800 pb-2">
-                            <span className="text-slate-400">Course:</span>
-                            <span className="font-bold text-slate-900 dark:text-[#F8FAFC] text-right">
-                              {currentSelectedCourse.code} — {currentSelectedCourse.name || currentSelectedCourse.title}
-                            </span>
-                          </div>
-
-                          {selectedPkg && (
-                            <div className="flex justify-between border-b border-slate-200 dark:border-slate-800 pb-2">
-                              <span className="text-slate-400">Package:</span>
-                              <span className="font-bold text-slate-900 dark:text-[#F8FAFC]">
-                                {selectedPkg.name} ({selectedPkg.package_code})
-                              </span>
-                            </div>
-                          )}
-
-                          <div className="flex justify-between border-b border-slate-200 dark:border-slate-800 pb-2">
-                            <span className="text-slate-400">Training Schedule:</span>
-                            <span className="font-bold text-sky-600 dark:text-sky-400">
-                              Set by Admin (No fixed schedule)
-                            </span>
-                          </div>
-
-                          <div className="flex justify-between border-b border-slate-200 dark:border-slate-800 pb-2">
-                            <span className="text-slate-400">Category &amp; Pacing:</span>
-                            <span className="font-bold text-sky-600 dark:text-sky-400 text-right">
-                              {String(currentSelectedCourse.category || '').toLowerCase().includes('in-house')
-                                ? 'MODULAR / IN-HOUSE (Max 3 Days)'
-                                : 'MODULAR + PRACTICAL (Max 3 Days Modular)'}
-                            </span>
-                          </div>
-
-                          <div className="space-y-1.5 border-b border-slate-200 dark:border-slate-800 pb-2.5">
-                            <span className="text-slate-400 block">Enrollment Classification:</span>
-                            <div className="grid grid-cols-2 gap-2">
-                              {(['NEW', 'REFRESHER'] as const).map((typeOpt) => (
-                                <button
-                                  key={typeOpt}
-                                  type="button"
-                                  onClick={() => {
-                                    setEnrollmentType(typeOpt);
-                                    setErrorMessage('');
-                                  }}
-                                  className={`py-1.5 px-3 rounded-xl font-mono text-[11px] font-bold border transition-all cursor-pointer ${
-                                    enrollmentType === typeOpt
-                                      ? 'bg-sky-600 text-white border-sky-600 shadow-xs'
-                                      : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'
-                                  }`}
-                                >
-                                  {typeOpt === 'NEW' ? 'NEW ENROLLMENT' : 'REFRESHER'}
-                                </button>
-                              ))}
-                            </div>
-                            {enrollmentType === 'REFRESHER' && (
-                              <div className="pt-1.5">
-                                <input
-                                  type="text"
-                                  value={previousCertNo}
-                                  onChange={(e) => setPreviousCertNo(e.target.value)}
-                                  placeholder="Enter previous STCW Certificate No. (e.g. CERT-2021-001)"
-                                  className="w-full px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-mono text-slate-900 dark:text-white outline-none focus:border-sky-500"
-                                />
-                              </div>
-                            )}
-                          </div>
-
-                          <div className="space-y-1.5 border-b border-slate-200 dark:border-slate-800 pb-2.5">
-                            <span className="text-slate-400 block">Mandatory Prerequisite &amp; Document Checklist:</span>
-                            <label className="flex items-center gap-2 text-[11px] font-sans text-slate-700 dark:text-slate-200 cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={docGovIdChecked}
-                                onChange={(e) => setDocGovIdChecked(e.target.checked)}
-                                className="rounded border-slate-300"
-                              />
-                              <span>Valid Government-Issued ID / MARINA ID Verified</span>
-                            </label>
-                            <label className="flex items-center gap-2 text-[11px] font-sans text-slate-700 dark:text-slate-200 cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={docSirbChecked}
-                                onChange={(e) => setDocSirbChecked(e.target.checked)}
-                                className="rounded border-slate-300"
-                              />
-                              <span>Seafarer&apos;s Record Book (SIRB) &amp; SRN ({traineeProfile?.srn || 'Verified'})</span>
-                            </label>
-                            {enrollmentType === 'REFRESHER' && (
-                              <label className="flex items-center gap-2 text-[11px] font-sans text-slate-700 dark:text-slate-200 cursor-pointer">
-                                <input
-                                  type="checkbox"
-                                  checked={docPriorCertChecked}
-                                  onChange={(e) => setDocPriorCertChecked(e.target.checked)}
-                                  className="rounded border-slate-300"
-                                />
-                                <span>Previous Training Certificate (Expired / Eligible for Refresher)</span>
-                              </label>
-                            )}
-                          </div>
-
-                          <div className="flex justify-between border-b border-slate-200 dark:border-slate-800 pb-2">
-                            <span className="text-slate-400">Seafarer SRN:</span>
-                            <span className="font-bold text-emerald-600 dark:text-emerald-400">
-                              {traineeProfile?.srn || 'Not Set'}
-                            </span>
-                          </div>
-
-                          <div className="flex justify-between pt-1">
-                            <span className="text-slate-400 uppercase font-bold">Total Tuition Price:</span>
-                            <span className="font-extrabold text-base text-emerald-600 dark:text-emerald-400">
-                              ₱{feeAmount.toLocaleString()}
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    })()}
-
-                    <p className="text-[11px] font-sans text-slate-500 dark:text-slate-400">
-                      Confirming reserves your seat. An official enrollment record will be created in <strong>PAYMENT_PENDING</strong> status. The training schedule will be set and assigned by administration upon verification.
-                    </p>
-                  </div>
-
-                  <div className="p-4 bg-slate-50 dark:bg-slate-900/60 border-t border-slate-200/80 dark:border-slate-800 flex items-center justify-end gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setApplyModalOpen(false)}
-                      className="px-4 py-2 rounded-xl text-slate-600 dark:text-[#CBD5E1] hover:bg-sky-500/10 dark:hover:bg-white/5 text-xs font-semibold cursor-pointer"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleApply}
-                      disabled={applying}
-                      className="inline-flex items-center gap-1.5 px-6 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:opacity-95 text-white font-bold text-xs shadow-md shadow-emerald-600/25 disabled:opacity-40 cursor-pointer"
-                    >
-                      <Send className="w-3.5 h-3.5" />
-                      <span>{applying ? 'Reserving...' : 'CONTINUE TO PAYMENT'}</span>
-                    </button>
-                  </div>
-                </div>
-              )}
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* MISSING SRN MODAL (SECTIONS 11 & 45) */}
-      <AnimatePresence>
-        {missingSrnModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setMissingSrnModalOpen(false)}
-              className="fixed inset-0 bg-black/60 backdrop-blur-sm"
-            />
-
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="relative w-full max-w-md bg-white dark:bg-[#0c1a2c] border border-amber-500/40 rounded-3xl shadow-2xl p-6 text-center z-10 space-y-4"
-            >
-              <div className="w-14 h-14 rounded-2xl bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center mx-auto">
-                <AlertCircle className="w-7 h-7" />
+            <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 text-xs font-mono text-left space-y-1.5">
+              <div className="flex flex-wrap justify-between gap-x-3 gap-y-0.5">
+                <span className="text-slate-400">Course:</span>
+                <span className="font-bold text-slate-900 dark:text-[#F8FAFC] text-right">{recentApplication.courseTitle}</span>
               </div>
+              <div className="flex flex-wrap justify-between gap-x-3 gap-y-0.5">
+                <span className="text-slate-400">Schedule:</span>
+                <span className="font-bold text-sky-600 dark:text-sky-400">To be set by Admin</span>
+              </div>
+              <div className="flex flex-wrap justify-between gap-x-3 gap-y-0.5">
+                <span className="text-slate-400">Tuition Fee:</span>
+                <span className="font-bold text-emerald-600 dark:text-emerald-400">₱{Number(recentApplication.fee).toLocaleString()}</span>
+              </div>
+              <div className="flex flex-wrap justify-between gap-x-3 gap-y-0.5">
+                <span className="text-slate-400">Status:</span>
+                <span className="font-bold text-amber-600 dark:text-amber-400">PAYMENT_PENDING</span>
+              </div>
+            </div>
 
-              <div>
+            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-left text-[11px] text-amber-700 dark:text-amber-300">
+              Please settle your tuition via PayMongo to finalize your seat reservation. Your training schedule will be coordinated and assigned by administration upon approval.
+            </div>
+
+            <div className="pt-2 flex flex-col sm:flex-row gap-2 justify-center">
+              <Link
+                href={`/payments?enrollmentId=${recentApplication.id}`}
+                className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs shadow-md shadow-sky-500/20"
+              >
+                <CreditCard className="w-4 h-4" />
+                <span>Pay Tuition with PayMongo (GCash / Maya) →</span>
+              </Link>
+              <button
+                type="button"
+                onClick={() => setApplyModalOpen(false)}
+                className="px-4 py-2 rounded-xl text-slate-500 hover:bg-slate-100 dark:hover:bg-white/5 text-xs font-semibold cursor-pointer"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col flex-1 min-h-0">
+            <div className="p-4 sm:p-6 border-b border-slate-200/80 dark:border-slate-800 flex items-start justify-between gap-3 shrink-0">
+              <div className="min-w-0">
                 <h3 className="text-base font-extrabold text-slate-900 dark:text-[#F8FAFC] font-heading">
-                  Profile Incomplete — SRN Required
+                  Confirm Course Enrollment
                 </h3>
-                <p className="text-xs text-slate-600 dark:text-[#CBD5E1] mt-1.5 leading-relaxed font-sans">
-                  Please complete your trainee profile by adding your SRN before enrolling in a training course.
+                <p className="text-xs text-sky-500 font-mono mt-0.5">
+                  Please verify your enrollment details before proceeding to payment.
                 </p>
               </div>
+              <button
+                type="button"
+                onClick={() => setApplyModalOpen(false)}
+                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5 cursor-pointer shrink-0"
+                aria-label="Close enrollment confirmation"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
 
-              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-[11px] font-mono text-amber-700 dark:text-amber-300">
-                A valid Seafarer's Registration Number (SRN) is required by MARINA compliance before seat reservation.
-              </div>
+            <div className="p-4 sm:p-6 space-y-4 text-xs font-mono overflow-y-auto overscroll-contain flex-1 min-h-0">
+              {ongoingError && (
+                <div className="p-4 rounded-2xl bg-rose-500/15 border border-rose-500/30 text-rose-800 dark:text-rose-300 text-xs font-mono space-y-1">
+                  <div className="flex items-center gap-2 font-bold">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                    <span>Ongoing Course Exists</span>
+                  </div>
+                  <p className="text-[11px] font-sans">{ongoingError}</p>
+                </div>
+              )}
 
-              <div className="flex flex-col sm:flex-row gap-2 justify-center pt-2">
-                <Link
-                  href="/settings"
-                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-amber-500 hover:opacity-95 text-white font-bold text-xs shadow-md shadow-amber-500/25"
-                >
-                  GO TO SETTINGS
-                </Link>
-                <button
-                  type="button"
-                  onClick={() => setMissingSrnModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-slate-500 hover:bg-slate-100 dark:hover:bg-white/5 text-xs font-semibold cursor-pointer"
-                >
-                  Cancel
-                </button>
-              </div>
-            </motion.div>
+              {prereqError && (
+                <div className="p-4 rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-800 dark:text-amber-300 text-xs font-mono space-y-1">
+                  <div className="flex items-center gap-2 font-bold">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-amber-600" />
+                    <span>Prerequisite Required</span>
+                  </div>
+                  <p className="text-[11px] font-sans">{prereqError}</p>
+                </div>
+              )}
+
+              {errorMessage && (
+                <div className="p-4 rounded-2xl bg-rose-500/15 border border-rose-500/30 text-rose-700 dark:text-rose-300 text-xs font-mono flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-rose-500" />
+                  <span>{errorMessage}</span>
+                </div>
+              )}
+
+              {(() => {
+                const selectedPkg = availablePackages.find((p: any) => p.id === selectedPackageId);
+                const feeAmount = selectedPkg?.package_price ? Number(selectedPkg.package_price) : Number(currentSelectedCourse.fee || currentSelectedCourse.price || 7500);
+
+                return (
+                  <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 space-y-3">
+                    <div className="flex flex-wrap justify-between gap-x-4 gap-y-1 border-b border-slate-200 dark:border-slate-800 pb-2">
+                      <span className="text-slate-400">Course:</span>
+                      <span className="font-bold text-slate-900 dark:text-[#F8FAFC] text-right">
+                        {currentSelectedCourse.code} — {currentSelectedCourse.name || currentSelectedCourse.title}
+                      </span>
+                    </div>
+
+                    {selectedPkg && (
+                      <div className="flex flex-wrap justify-between gap-x-4 gap-y-1 border-b border-slate-200 dark:border-slate-800 pb-2">
+                        <span className="text-slate-400">Package:</span>
+                        <span className="font-bold text-slate-900 dark:text-[#F8FAFC] text-right">
+                          {selectedPkg.name} ({selectedPkg.package_code})
+                        </span>
+                      </div>
+                    )}
+
+                    <div className="flex flex-wrap justify-between gap-x-4 gap-y-1 border-b border-slate-200 dark:border-slate-800 pb-2">
+                      <span className="text-slate-400">Training Schedule:</span>
+                      <span className="font-bold text-sky-600 dark:text-sky-400 text-right">
+                        Set by Admin (No fixed schedule)
+                      </span>
+                    </div>
+
+                    <div className="flex flex-wrap justify-between gap-x-4 gap-y-1 border-b border-slate-200 dark:border-slate-800 pb-2">
+                      <span className="text-slate-400">Category &amp; Pacing:</span>
+                      <span className="font-bold text-sky-600 dark:text-sky-400 text-right">
+                        {String(currentSelectedCourse.category || '').toLowerCase().includes('in-house')
+                          ? 'MODULAR / IN-HOUSE (Max 3 Days)'
+                          : 'MODULAR + PRACTICAL (Max 3 Days Modular)'}
+                      </span>
+                    </div>
+
+                    <div className="space-y-1.5 border-b border-slate-200 dark:border-slate-800 pb-2.5">
+                      <span className="text-slate-400 block">Enrollment Classification:</span>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {(['NEW', 'REFRESHER'] as const).map((typeOpt) => (
+                          <button
+                            key={typeOpt}
+                            type="button"
+                            onClick={() => {
+                              setEnrollmentType(typeOpt);
+                              setErrorMessage('');
+                            }}
+                            className={`py-1.5 px-3 rounded-xl font-mono text-[11px] font-bold border transition-all cursor-pointer ${
+                              enrollmentType === typeOpt
+                                ? 'bg-sky-600 text-white border-sky-600 shadow-xs'
+                                : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                            }`}
+                          >
+                            {typeOpt === 'NEW' ? 'NEW ENROLLMENT' : 'REFRESHER'}
+                          </button>
+                        ))}
+                      </div>
+                      {enrollmentType === 'REFRESHER' && (
+                        <div className="pt-1.5">
+                          <input
+                            type="text"
+                            value={previousCertNo}
+                            onChange={(e) => setPreviousCertNo(e.target.value)}
+                            placeholder="Enter previous STCW Certificate No. (e.g. CERT-2021-001)"
+                            className="w-full px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-mono text-slate-900 dark:text-white outline-none focus:border-sky-500"
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="space-y-1.5 border-b border-slate-200 dark:border-slate-800 pb-2.5">
+                      <span className="text-slate-400 block">Mandatory Prerequisite &amp; Document Checklist:</span>
+                      <label className="flex items-start gap-2 text-[11px] font-sans text-slate-700 dark:text-slate-200 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={docGovIdChecked}
+                          onChange={(e) => setDocGovIdChecked(e.target.checked)}
+                          className="rounded border-slate-300 mt-0.5 shrink-0"
+                        />
+                        <span>Valid Government-Issued ID / MARINA ID Verified</span>
+                      </label>
+                      <label className="flex items-start gap-2 text-[11px] font-sans text-slate-700 dark:text-slate-200 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={docSirbChecked}
+                          onChange={(e) => setDocSirbChecked(e.target.checked)}
+                          className="rounded border-slate-300 mt-0.5 shrink-0"
+                        />
+                        <span>Seafarer&apos;s Record Book (SIRB) &amp; SRN ({traineeProfile?.srn || 'Verified'})</span>
+                      </label>
+                      {enrollmentType === 'REFRESHER' && (
+                        <label className="flex items-start gap-2 text-[11px] font-sans text-slate-700 dark:text-slate-200 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={docPriorCertChecked}
+                            onChange={(e) => setDocPriorCertChecked(e.target.checked)}
+                            className="rounded border-slate-300 mt-0.5 shrink-0"
+                          />
+                          <span>Previous Training Certificate (Expired / Eligible for Refresher)</span>
+                        </label>
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap justify-between gap-x-4 gap-y-1 border-b border-slate-200 dark:border-slate-800 pb-2">
+                      <span className="text-slate-400">Seafarer SRN:</span>
+                      <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                        {traineeProfile?.srn || 'Not Set'}
+                      </span>
+                    </div>
+
+                    <div className="flex flex-wrap justify-between items-center gap-x-4 gap-y-1 pt-1">
+                      <span className="text-slate-400 uppercase font-bold">Total Tuition Price:</span>
+                      <span className="font-extrabold text-base text-emerald-600 dark:text-emerald-400">
+                        ₱{feeAmount.toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <p className="text-[11px] font-sans text-slate-500 dark:text-slate-400">
+                Confirming reserves your seat. An official enrollment record will be created in <strong>PAYMENT_PENDING</strong> status. The training schedule will be set and assigned by administration upon verification.
+              </p>
+            </div>
+
+            <div className="p-4 bg-slate-50 dark:bg-slate-900/60 border-t border-slate-200/80 dark:border-slate-800 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 sm:gap-3 shrink-0">
+              <button
+                type="button"
+                onClick={() => setApplyModalOpen(false)}
+                className="px-4 py-2 rounded-xl text-slate-600 dark:text-[#CBD5E1] hover:bg-sky-500/10 dark:hover:bg-white/5 text-xs font-semibold cursor-pointer text-center"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleApply}
+                disabled={applying}
+                className="inline-flex items-center justify-center gap-1.5 px-6 py-2.5 sm:py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:opacity-95 text-white font-bold text-xs shadow-md shadow-emerald-600/25 disabled:opacity-40 cursor-pointer"
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span>{applying ? 'Reserving...' : 'CONTINUE TO PAYMENT'}</span>
+              </button>
+            </div>
           </div>
-        )}
-      </AnimatePresence>
+        ))}
+      </ResponsiveModal>
+
+      {/* MISSING SRN MODAL (SECTIONS 11 & 45) */}
+      <ResponsiveModal
+        isOpen={missingSrnModalOpen}
+        onClose={() => setMissingSrnModalOpen(false)}
+        maxWidthClassName="max-w-md"
+        panelClassName="border-amber-500/40"
+      >
+        <div className="p-5 sm:p-6 text-center space-y-4 overflow-y-auto overscroll-contain flex-1 min-h-0">
+          <div className="w-14 h-14 rounded-2xl bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center mx-auto">
+            <AlertCircle className="w-7 h-7" />
+          </div>
+
+          <div>
+            <h3 className="text-base font-extrabold text-slate-900 dark:text-[#F8FAFC] font-heading">
+              Profile Incomplete — SRN Required
+            </h3>
+            <p className="text-xs text-slate-600 dark:text-[#CBD5E1] mt-1.5 leading-relaxed font-sans">
+              Please complete your trainee profile by adding your SRN before enrolling in a training course.
+            </p>
+          </div>
+
+          <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-[11px] font-mono text-amber-700 dark:text-amber-300">
+            A valid Seafarer&apos;s Registration Number (SRN) is required by MARINA compliance before seat reservation.
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-2 justify-center pt-2">
+            <Link
+              href="/settings"
+              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-amber-500 hover:opacity-95 text-white font-bold text-xs shadow-md shadow-amber-500/25"
+            >
+              GO TO SETTINGS
+            </Link>
+            <button
+              type="button"
+              onClick={() => setMissingSrnModalOpen(false)}
+              className="px-4 py-2 rounded-xl text-slate-500 hover:bg-slate-100 dark:hover:bg-white/5 text-xs font-semibold cursor-pointer"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </ResponsiveModal>
 
       {/* Official Receipt Modal */}
       <OfficialReceiptModal

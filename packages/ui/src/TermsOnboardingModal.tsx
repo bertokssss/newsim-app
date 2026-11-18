@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ShieldCheck, ScrollText, CheckCircle2 } from 'lucide-react';
+import { acquireViewportScrollLock } from './modal-shell';
 
 export interface TermsOnboardingModalProps {
   isOpen: boolean;
@@ -18,6 +19,11 @@ export function TermsOnboardingModal({
   const [checked, setChecked] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    return acquireViewportScrollLock();
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -49,9 +55,9 @@ export function TermsOnboardingModal({
       role="dialog"
       aria-modal="true"
       aria-labelledby="terms-onboarding-title"
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-[#040B14]/85 backdrop-blur-md p-4"
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-[#040B14]/85 backdrop-blur-md p-3 sm:p-4 overflow-hidden"
     >
-      <div className="w-full max-w-lg rounded-2xl border border-[#D8C4A5]/30 bg-[#0D1A2B] p-6 sm:p-7 text-slate-100 shadow-2xl space-y-5">
+      <div className="w-full max-w-lg max-h-[calc(100dvh-1.5rem)] sm:max-h-[calc(100dvh-2.5rem)] overflow-y-auto overscroll-contain rounded-2xl border border-[#D8C4A5]/30 bg-[#0D1A2B] p-5 sm:p-7 text-slate-100 shadow-2xl space-y-5">
         <div className="flex items-start gap-3">
           <div className="w-10 h-10 rounded-xl bg-[#D8C4A5]/15 border border-[#D8C4A5]/30 flex items-center justify-center shrink-0">
             <ScrollText className="w-5 h-5 text-[#D8C4A5]" />

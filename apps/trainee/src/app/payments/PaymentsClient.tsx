@@ -4,7 +4,6 @@ import React, { useState, useEffect, Suspense } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { motion, AnimatePresence } from 'framer-motion';
 import type { OfficialReceiptData } from '@/components/OfficialReceiptModal';
 
 const OfficialReceiptModal = dynamic(() => import('@/components/OfficialReceiptModal'), { ssr: false });
@@ -25,7 +24,7 @@ import {
   Printer,
   User,
 } from 'lucide-react';
-import { TablePageSkeleton } from '@newsim/ui';
+import { TablePageSkeleton, ResponsiveModal } from '@newsim/ui';
 
 function PaymentsContent() {
   const searchParams = useSearchParams();
@@ -429,177 +428,164 @@ function PaymentsContent() {
       </div>
 
       {/* PayMongo Checkout Modal */}
-      <AnimatePresence>
-        {checkoutModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setCheckoutModalOpen(false)}
-              className="fixed inset-0 bg-black/60 backdrop-blur-sm"
-            />
+      <ResponsiveModal
+        isOpen={checkoutModalOpen}
+        onClose={() => setCheckoutModalOpen(false)}
+        disableClose={submitting}
+        maxWidthClassName="max-w-md"
+        topAccentClassName="h-1.5 bg-sky-500"
+      >
+        <div className="p-4 sm:p-6 border-b border-slate-200/80 dark:border-slate-800 flex items-center justify-between gap-3 shrink-0">
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5 mb-0.5">
+              <span className="text-[10px] font-mono font-bold bg-sky-500/10 text-sky-600 dark:text-sky-400 px-2 py-0.2 rounded">
+                PayMongo Gateway
+              </span>
+            </div>
+            <h3 className="text-base font-extrabold text-slate-900 dark:text-[#F8FAFC] font-heading">
+              Tuition Settlement
+            </h3>
+          </div>
+          <button
+            type="button"
+            onClick={() => setCheckoutModalOpen(false)}
+            disabled={submitting}
+            className="p-1.5 rounded-xl text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5 cursor-pointer shrink-0 disabled:opacity-40"
+            aria-label="Close tuition settlement"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
 
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              transition={{ duration: 0.2 }}
-              className="relative w-full max-w-md bg-white dark:bg-[#0c1a2c] border border-slate-200/80 dark:border-slate-800 rounded-3xl shadow-2xl overflow-hidden z-10"
-            >
-              <div className="h-1.5 bg-sky-500 w-full" />
+        <div className="p-4 sm:p-6 space-y-5 text-xs overflow-y-auto overscroll-contain flex-1 min-h-0">
+          {errorMessage && (
+            <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-700 dark:text-rose-300 text-[11px] font-mono flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+              <span>{errorMessage}</span>
+            </div>
+          )}
 
-              <div className="p-6 border-b border-slate-200/80 dark:border-slate-800 flex items-center justify-between">
-                <div>
-                  <div className="flex items-center gap-1.5 mb-0.5">
-                    <span className="text-[10px] font-mono font-bold bg-sky-500/10 text-sky-600 dark:text-sky-400 px-2 py-0.2 rounded">
-                      PayMongo Gateway
+          {enrollments.length === 0 ? (
+            <div className="text-center py-8 space-y-3">
+              <AlertCircle className="w-10 h-10 text-amber-500 mx-auto" />
+              <p className="text-xs text-slate-500">You do not have any active course enrollments yet.</p>
+              <Link
+                href="/enrollment"
+                onClick={() => setCheckoutModalOpen(false)}
+                className="inline-block px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs shadow-sm"
+              >
+                Apply for Course First →
+              </Link>
+            </div>
+          ) : (
+            <form onSubmit={handlePayMongoCheckout} className="space-y-4">
+              {/* Course / Enrollment Selector */}
+              <div className="space-y-1.5">
+                <label className="font-bold text-slate-900 dark:text-[#F8FAFC] font-heading uppercase text-[10px] block">
+                  Select Course Application
+                </label>
+                <select
+                  value={selectedEnrollmentId}
+                  onChange={(e) => setSelectedEnrollmentId(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-xl bg-white dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 text-xs text-slate-900 dark:text-[#F8FAFC] focus:outline-none focus:border-slate-200/80 dark:border-slate-800"
+                >
+                  {enrollments.map((enr) => (
+                    <option key={enr.id} value={enr.id}>
+                      {enr.enrollmentNo}: {enr.courseTitle} — ₱{(enr.fee || 7500).toLocaleString()} ({enr.status})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Amount & Batch Card */}
+              <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 font-mono space-y-1.5">
+                <div className="flex flex-wrap justify-between items-center gap-2">
+                  <span className="text-slate-400">Assigned Batch:</span>
+                  <span className="font-bold text-sky-600 dark:text-sky-400">
+                    {selectedEnrollment?.batchCode || 'Cohort'}
+                  </span>
+                </div>
+                <div className="flex flex-wrap justify-between items-center gap-2">
+                  <span className="text-slate-400">Tuition Total:</span>
+                  <span className="text-base font-extrabold text-emerald-600 dark:text-emerald-400">
+                    ₱{payableAmount.toLocaleString()}
+                  </span>
+                </div>
+              </div>
+
+              {/* E-Wallet Channel Selector (GCash or Maya) */}
+              <div className="space-y-2">
+                <label className="font-bold text-slate-900 dark:text-[#F8FAFC] font-heading uppercase text-[10px] block">
+                  Choose PayMongo E-Wallet Channel
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* GCash Option */}
+                  <div
+                    onClick={() => setSelectedMethod('gcash')}
+                    className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between space-y-2 ${
+                      selectedMethod === 'gcash'
+                        ? 'bg-blue-500/10 border-blue-500 shadow-xs'
+                        : 'bg-white dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 hover:border-blue-500/50'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono font-extrabold text-xs text-blue-600 dark:text-blue-400">
+                        GCash
+                      </span>
+                      <Smartphone className="w-4 h-4 text-blue-500" />
+                    </div>
+                    <span className="text-[10px] font-mono text-slate-400">
+                      Instant e-wallet checkout
                     </span>
                   </div>
-                  <h3 className="text-base font-extrabold text-slate-900 dark:text-[#F8FAFC] font-heading">
-                    Tuition Settlement
-                  </h3>
+
+                  {/* Maya Option */}
+                  <div
+                    onClick={() => setSelectedMethod('paymaya')}
+                    className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between space-y-2 ${
+                      selectedMethod === 'paymaya'
+                        ? 'bg-emerald-500/10 border-emerald-500 shadow-xs'
+                        : 'bg-white dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 hover:border-emerald-500/50'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono font-extrabold text-xs text-emerald-600 dark:text-emerald-400">
+                        Maya
+                      </span>
+                      <Wallet className="w-4 h-4 text-emerald-500" />
+                    </div>
+                    <span className="text-[10px] font-mono text-slate-400">
+                      Pay via Maya App / QR
+                    </span>
+                  </div>
                 </div>
-                <button
-                  onClick={() => setCheckoutModalOpen(false)}
-                  className="p-1.5 rounded-xl text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5 cursor-pointer"
-                >
-                  <X className="w-5 h-5" />
-                </button>
               </div>
 
-              <div className="p-6 space-y-5 text-xs">
-                {errorMessage && (
-                  <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-700 dark:text-rose-300 text-[11px] font-mono flex items-center gap-2">
-                    <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
-                    <span>{errorMessage}</span>
-                  </div>
-                )}
+              <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-[11px] text-amber-700 dark:text-amber-300 leading-relaxed font-sans">
+                Clicking proceed will redirect you to PayMongo&apos;s secure test checkout page. Complete the payment using test credentials, and your application will automatically transition to <strong>PENDING REVIEW</strong>.
+              </div>
 
-                {enrollments.length === 0 ? (
-                  <div className="text-center py-8 space-y-3">
-                    <AlertCircle className="w-10 h-10 text-amber-500 mx-auto" />
-                    <p className="text-xs text-slate-500">You do not have any active course enrollments yet.</p>
-                    <Link
-                      href="/enrollment"
-                      onClick={() => setCheckoutModalOpen(false)}
-                      className="inline-block px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs shadow-sm"
-                    >
-                      Apply for Course First →
-                    </Link>
-                  </div>
+              <button
+                type="submit"
+                disabled={submitting}
+                className="w-full py-3 rounded-2xl bg-sky-600 hover:bg-sky-700 hover:opacity-95 text-white font-bold text-xs shadow-md shadow-sky-500/20 disabled:opacity-40 cursor-pointer flex items-center justify-center gap-2"
+              >
+                {submitting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Connecting to PayMongo...</span>
+                  </>
                 ) : (
-                  <form onSubmit={handlePayMongoCheckout} className="space-y-4">
-                    {/* Course / Enrollment Selector */}
-                    <div className="space-y-1.5">
-                      <label className="font-bold text-slate-900 dark:text-[#F8FAFC] font-heading uppercase text-[10px] block">
-                        Select Course Application
-                      </label>
-                      <select
-                        value={selectedEnrollmentId}
-                        onChange={(e) => setSelectedEnrollmentId(e.target.value)}
-                        className="w-full px-3 py-2.5 rounded-xl bg-white dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 text-xs text-slate-900 dark:text-[#F8FAFC] focus:outline-none focus:border-slate-200/80 dark:border-slate-800"
-                      >
-                        {enrollments.map((enr) => (
-                          <option key={enr.id} value={enr.id}>
-                            {enr.enrollmentNo}: {enr.courseTitle} — ₱{(enr.fee || 7500).toLocaleString()} ({enr.status})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {/* Amount & Batch Card */}
-                    <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 font-mono space-y-1.5">
-                      <div className="flex justify-between items-center">
-                        <span className="text-slate-400">Assigned Batch:</span>
-                        <span className="font-bold text-sky-600 dark:text-sky-400">
-                          {selectedEnrollment?.batchCode || 'Cohort'}
-                        </span>
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <span className="text-slate-400">Tuition Total:</span>
-                        <span className="text-base font-extrabold text-emerald-600 dark:text-emerald-400">
-                          ₱{payableAmount.toLocaleString()}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* E-Wallet Channel Selector (GCash or Maya) */}
-                    <div className="space-y-2">
-                      <label className="font-bold text-slate-900 dark:text-[#F8FAFC] font-heading uppercase text-[10px] block">
-                        Choose PayMongo E-Wallet Channel
-                      </label>
-                      <div className="grid grid-cols-2 gap-3">
-                        {/* GCash Option */}
-                        <div
-                          onClick={() => setSelectedMethod('gcash')}
-                          className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between space-y-2 ${
-                            selectedMethod === 'gcash'
-                              ? 'bg-blue-500/10 border-blue-500 shadow-xs'
-                              : 'bg-white dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 hover:border-blue-500/50'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="font-mono font-extrabold text-xs text-blue-600 dark:text-blue-400">
-                              GCash
-                            </span>
-                            <Smartphone className="w-4 h-4 text-blue-500" />
-                          </div>
-                          <span className="text-[10px] font-mono text-slate-400">
-                            Instant e-wallet checkout
-                          </span>
-                        </div>
-
-                        {/* Maya Option */}
-                        <div
-                          onClick={() => setSelectedMethod('paymaya')}
-                          className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between space-y-2 ${
-                            selectedMethod === 'paymaya'
-                              ? 'bg-emerald-500/10 border-emerald-500 shadow-xs'
-                              : 'bg-white dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 hover:border-emerald-500/50'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="font-mono font-extrabold text-xs text-emerald-600 dark:text-emerald-400">
-                              Maya
-                            </span>
-                            <Wallet className="w-4 h-4 text-emerald-500" />
-                          </div>
-                          <span className="text-[10px] font-mono text-slate-400">
-                            Pay via Maya App / QR
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-[11px] text-amber-700 dark:text-amber-300 leading-relaxed font-sans">
-                      Clicking proceed will redirect you to PayMongo&apos;s secure test checkout page. Complete the payment using test credentials, and your application will automatically transition to <strong>PENDING REVIEW</strong>.
-                    </div>
-
-                    <button
-                      type="submit"
-                      disabled={submitting}
-                      className="w-full py-3 rounded-2xl bg-sky-600 hover:bg-sky-700 hover:opacity-95 text-white font-bold text-xs shadow-md shadow-sky-500/20 disabled:opacity-40 cursor-pointer flex items-center justify-center gap-2"
-                    >
-                      {submitting ? (
-                        <>
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                          <span>Connecting to PayMongo...</span>
-                        </>
-                      ) : (
-                        <>
-                          <span>Proceed to PayMongo Checkout (₱{payableAmount.toLocaleString()})</span>
-                          <ExternalLink className="w-4 h-4" />
-                        </>
-                      )}
-                    </button>
-                  </form>
+                  <>
+                    <span>Proceed to PayMongo Checkout (₱{payableAmount.toLocaleString()})</span>
+                    <ExternalLink className="w-4 h-4" />
+                  </>
                 )}
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+              </button>
+            </form>
+          )}
+        </div>
+      </ResponsiveModal>
 
       {/* Official Receipt Modal */}
       <OfficialReceiptModal

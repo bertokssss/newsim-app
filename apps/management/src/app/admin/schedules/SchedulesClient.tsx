@@ -916,7 +916,7 @@ export default function SchedulesClient() {
         {createModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={() => !submitting && setCreateModalOpen(false)} />
-            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} className="relative w-full max-w-lg bg-white dark:bg-[#0c1a2c] border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-2xl z-10 space-y-4">
+            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} className="relative w-full max-w-lg max-h-[calc(100dvh-1.5rem)] sm:max-h-[90dvh] overflow-y-auto overscroll-contain bg-white dark:bg-[#0c1a2c] border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-6 shadow-2xl z-10 space-y-4">
               <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
                 <div className="flex items-center gap-2">
                   <Sparkles className="w-5 h-5 text-emerald-500" />
@@ -1176,11 +1176,11 @@ export default function SchedulesClient() {
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
               transition={{ duration: 0.2 }}
-              className="relative w-full max-w-lg bg-white dark:bg-[#0c1a2c] border border-slate-200/80 dark:border-slate-800 rounded-3xl shadow-2xl overflow-hidden z-10 flex flex-col"
+              className="relative w-full max-w-lg max-h-[calc(100dvh-1.5rem)] sm:max-h-[90dvh] bg-white dark:bg-[#0c1a2c] border border-slate-200/80 dark:border-slate-800 rounded-3xl shadow-2xl overflow-hidden z-10 flex flex-col"
             >
               <div className="h-1.5 bg-sky-500 w-full shrink-0" />
 
-              <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+              <div className="p-5 sm:p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0">
                 <div>
                   <h3 className="text-lg font-extrabold text-slate-900 dark:text-[#F8FAFC] font-heading flex items-center gap-2">
                     <UserCheck className="w-5 h-5 text-purple-600 dark:text-purple-400" />
@@ -1199,7 +1199,7 @@ export default function SchedulesClient() {
                 </button>
               </div>
 
-              <form onSubmit={handleSaveSubstitute} className="p-6 space-y-4 text-xs font-mono">
+              <form onSubmit={handleSaveSubstitute} className="p-5 sm:p-6 space-y-4 text-xs font-mono overflow-y-auto overscroll-contain flex-1 min-h-0">
                 {substituteError && (
                   <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-600 text-xs flex items-center gap-2">
                     <AlertTriangle className="w-4 h-4 shrink-0" />
