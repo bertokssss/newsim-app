@@ -370,14 +370,37 @@ export function formatTrainee(row: any) {
   };
 }
 
+export function isFullModularCourseRow(row: any): boolean {
+  const cat = String(row?.category || '').trim().toLowerCase();
+  if (
+    cat.includes('in-house') ||
+    cat.includes('in house') ||
+    (cat.includes('modular') && !cat.includes('practical')) ||
+    cat.includes('online') ||
+    cat.includes('theoretical')
+  ) {
+    return true;
+  }
+  if (row?.practical_days !== undefined && row?.practical_days !== null && Number(row.practical_days) === 0) {
+    return true;
+  }
+  return false;
+}
+
 export function formatCourse(row: any) {
   const center = unwrap(row.training_centers);
   const instructors = Array.isArray(row.course_instructors) ? row.course_instructors : [];
   const firstInstructor = unwrap(unwrap(instructors[0])?.instructors);
   const instructorProfile = unwrap(firstInstructor?.profiles);
-  const totalDays = Math.ceil((row.duration_hours || 40) / 8) || 1;
-  const theoryDays = row.theory_days ?? (totalDays <= 1 ? 1 : Math.max(1, Math.round(totalDays * 0.4)));
-  const practicalDays = row.practical_days ?? Math.max(0, totalDays - theoryDays);
+  const isFullModular = isFullModularCourseRow(row);
+  const rawTotalDays = Math.ceil((row.duration_hours || 40) / 8) || 1;
+  const theoryDays = isFullModular
+    ? Math.min(3, rawTotalDays)
+    : (row.theory_days ?? (rawTotalDays <= 1 ? 1 : Math.max(1, Math.round(rawTotalDays * 0.4))));
+  const practicalDays = isFullModular
+    ? 0
+    : (row.practical_days ?? Math.max(0, rawTotalDays - theoryDays));
+  const totalDays = isFullModular ? theoryDays : theoryDays + practicalDays;
 
   return {
     id: row.id,
@@ -389,6 +412,9 @@ export function formatCourse(row: any) {
     trainingDays: totalDays,
     theoryDays,
     practicalDays,
+    isFullModular,
+    deliveryMode: isFullModular ? 'FULL_MODULAR' : 'MODULAR_AND_PRACTICAL',
+    requiresPractical: !isFullModular,
     capacity: Math.min(Math.max(1, Number(row.capacity ?? 24)), 24),
     enrolledCount: row.enrolled_count ?? (Array.isArray(row.enrollments) ? row.enrollments.length : (row.enrolledCount ?? 0)),
     fee: Number(row.price || 0),
@@ -488,8 +514,13 @@ export function formatSchedule(row: any) {
 
   const durationHours = Number(course?.duration_hours || 40);
   const durationDays = Math.max(1, Math.ceil(durationHours / 8));
-  const theoryDays = Number(course?.theory_days ?? (durationDays === 1 ? 1 : Math.max(1, Math.round(durationDays * 0.4))));
-  const practicalDays = Number(course?.practical_days ?? (durationDays === 1 ? 0 : Math.max(0, durationDays - theoryDays)));
+  const isFullModular = isFullModularCourseRow(course);
+  const theoryDays = isFullModular
+    ? Math.min(3, durationDays)
+    : Number(course?.theory_days ?? (durationDays === 1 ? 1 : Math.max(1, Math.round(durationDays * 0.4))));
+  const practicalDays = isFullModular
+    ? 0
+    : Number(course?.practical_days ?? (durationDays === 1 ? 0 : Math.max(0, durationDays - theoryDays)));
   const totalDays = Math.max(1, theoryDays + practicalDays);
 
   const startDate = start ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(start) : '';
@@ -757,7 +788,7 @@ export function formatBatch(row: any) {
   };
 }
 export const SCHEDULE_SELECT =
-  '*, courses(id, code, name, duration_hours, theory_days, practical_days), instructors(profiles(first_name, last_name, avatar_url)), training_centers(name)';
+  '*, courses(id, code, name, category, duration_hours, theory_days, practical_days), instructors(profiles(first_name, last_name, avatar_url)), training_centers(name)';
 export const ATTENDANCE_SELECT =
   '*, trainees(trainee_number, profiles(first_name, last_name, avatar_url)), courses(id, code, name, training_center_id), batches(id, batch_code, instructor_id, instructors(profiles(first_name, last_name, avatar_url))), schedules(id, start_at, end_at, room, instructor_id, course_id, training_center_id, courses(id, code, name), instructors(profiles(first_name, last_name, avatar_url)))';
 export const PAYMENT_SELECT =

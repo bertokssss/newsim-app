@@ -114,7 +114,14 @@ export default function AttendanceClient() {
           setSchedules(fetchedSchedules);
 
           if (fetchedCourses.length > 0) {
-            const firstCourseId = fetchedCourses[0].id;
+            const firstPracticalCourse =
+              fetchedCourses.find(
+                (c: any) =>
+                  !c.is_full_modular &&
+                  !String(c.category || '').toLowerCase().includes('in-house') &&
+                  Number(c.practical_days ?? 1) > 0
+              ) || fetchedCourses[0];
+            const firstCourseId = firstPracticalCourse.id;
             setSelectedCourseId(firstCourseId);
 
             // Filter batches for first course
@@ -150,16 +157,52 @@ export default function AttendanceClient() {
     }
   };
 
+  const selectedCourseObj = useMemo(
+    () => courses.find((c: any) => c.id === selectedCourseId) || null,
+    [courses, selectedCourseId]
+  );
+
+  const isSelectedCourseFullModular = useMemo(() => {
+    if (!selectedCourseObj) return false;
+    const cat = String(selectedCourseObj.category || '').toLowerCase();
+    if (
+      selectedCourseObj.is_full_modular ||
+      cat.includes('in-house') ||
+      cat.includes('in house') ||
+      (cat.includes('modular') && !cat.includes('practical'))
+    ) {
+      return true;
+    }
+    if (
+      selectedCourseObj.practical_days !== undefined &&
+      selectedCourseObj.practical_days !== null &&
+      Number(selectedCourseObj.practical_days) === 0
+    ) {
+      return true;
+    }
+    return false;
+  }, [selectedCourseObj]);
+
   // Practical session dates strictly based on the assigned course's practical_days
   // Attendance roll-call applies strictly to practical sessions per course / package policy
   const practicalSessionDates = useMemo(() => {
     const currentCourse = courses.find((c: any) => c.id === selectedCourseId);
     if (!currentCourse) return [];
 
+    const cat = String(currentCourse.category || '').toLowerCase();
+    if (
+      currentCourse.is_full_modular ||
+      cat.includes('in-house') ||
+      cat.includes('in house') ||
+      (cat.includes('modular') && !cat.includes('practical'))
+    ) {
+      return [];
+    }
+
     const durationHours = Number(currentCourse.duration_hours || 40);
     const durationDays = Math.max(1, Math.ceil(durationHours / 8));
     const theoryDays = Number(currentCourse.theory_days ?? (durationDays === 1 ? 1 : Math.max(1, Math.round(durationDays * 0.4))));
-    const practicalDaysCount = Math.max(0, Number(currentCourse.practical_days ?? Math.max(0, durationDays - theoryDays)));
+    const practicalDaysCount = Math.max(0, Number(currentCourse.practical_days ?? (durationDays === 1 ? 0 : Math.max(0, durationDays - theoryDays))));
 
     if (practicalDaysCount === 0) {
       return [];
@@ -335,8 +378,8 @@ export default function AttendanceClient() {
 
   // State flags for session locking and date restrictions
   const isFinalized = sessionInfo?.status === 'FINALIZED';
-  const isFutureDate = Boolean(sessionDate && sessionDate > todayDateStr);
-  const isReadOnly = isFinalized || isFutureDate;
+  const isFutureDate = Boolean(!isSelectedCourseFullModular && practicalSessionDates.length > 0 && sessionDate && sessionDate > todayDateStr);
+  const isReadOnly = isFinalized || isFutureDate || isSelectedCourseFullModular || practicalSessionDates.length === 0;
 
   // Status marking handler
   const handleStatusChange = (traineeId: string, status: AttendanceStatus) => {
@@ -669,11 +712,19 @@ export default function AttendanceClient() {
                 {courses.length === 0 ? (
                   <option value="">No assigned courses</option>
                 ) : (
-                  courses.map((c: any) => (
-                    <option key={c.id} value={c.id}>
-                      {c.code ? `[${c.code}] ` : ''}{c.name}
-                    </option>
-                  ))
+                  courses.map((c: any) => {
+                    const isModOnly =
+                      c.is_full_modular ||
+                      Number(c.practical_days) === 0 ||
+                      String(c.category || '').toLowerCase().includes('in-house') ||
+                      (String(c.category || '').toLowerCase().includes('modular') &&
+                        !String(c.category || '').toLowerCase().includes('practical'));
+                    return (
+                      <option key={c.id} value={c.id}>
+                        {c.code ? `[${c.code}] ` : ''}{c.name}{isModOnly ? ' (Full Modular — No Practical Date)' : ''}
+                      </option>
+                    );
+                  })
                 )}
               </select>
             </div>
@@ -711,7 +762,7 @@ export default function AttendanceClient() {
                   3. Practical Training Date *
                 </label>
                 <span className="text-[9px] font-mono font-bold text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-950/60 px-1.5 py-0.5 rounded border border-sky-200 dark:border-sky-800">
-                  {practicalSessionDates.length > 0 ? `${practicalSessionDates[0].totalDays} Practical Days` : 'Theory Only'}
+                  {practicalSessionDates.length > 0 ? `${practicalSessionDates[0].totalDays} Practical Days` : 'Full Modular (No Practical)'}
                 </span>
               </div>
               {practicalSessionDates.length > 0 ? (
@@ -727,8 +778,8 @@ export default function AttendanceClient() {
                   ))}
                 </select>
               ) : (
-                <div className="px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-400 text-[11px] font-mono">
-                  No Practical Days (Theory Course)
+                <div className="px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 text-[11px] font-mono font-bold">
+                  No Practical Date (Full Modular Course)
                 </div>
               )}
             </div>
@@ -752,7 +803,15 @@ export default function AttendanceClient() {
                 className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] shadow-sm transition-all cursor-pointer disabled:opacity-50"
               >
                 <Lock className="w-3.5 h-3.5" />
-                <span>{isFinalized ? 'Finalized' : isFutureDate ? 'Future Date' : 'Finalize'}</span>
+                <span>
+                  {isSelectedCourseFullModular || practicalSessionDates.length === 0
+                    ? 'No Practical'
+                    : isFinalized
+                    ? 'Finalized'
+                    : isFutureDate
+                    ? 'Future Date'
+                    : 'Finalize'}
+                </span>
               </button>
             </div>
           </div>
@@ -804,9 +863,11 @@ export default function AttendanceClient() {
               </span>
             </div>
           ) : (
-            <div className="p-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 flex items-center gap-2 text-xs font-mono text-amber-800 dark:text-amber-200">
-              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
-              <span>This assigned course consists of theoretical/classroom lecture only (0 practical days). Attendance roll-call applies to practical simulator and drill sessions.</span>
+            <div className="p-3.5 rounded-2xl bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-900/50 flex items-center gap-2.5 text-xs font-mono text-indigo-900 dark:text-indigo-200">
+              <AlertCircle className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
+              <span>
+                <strong>Full Modular / In-House Course — No Practical Training Date:</strong> Trainees complete modular lessons and assessments online within 3 days with no physical attendance or simulator schedule. Instructor role for this course is <strong>Academic Record Review</strong> only.
+              </span>
             </div>
           )}
 

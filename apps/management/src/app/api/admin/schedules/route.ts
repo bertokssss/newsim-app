@@ -5,6 +5,7 @@ import {
   computeEndDate,
   formatSchedule,
   isAdminContext,
+  isFullModularCourseRow,
   parseClockToIso,
   requestMeta,
   requireAdmin,
@@ -73,7 +74,9 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    let schedules = (data || []).map((row: any) => {
+    let schedules = (data || [])
+      .filter((row: any) => !isFullModularCourseRow(row.courses))
+      .map((row: any) => {
       const actualCount = countMap.get(row.course_id) || 0;
       const effectiveCap = Math.min(row.capacity || 24, 24);
 
@@ -123,9 +126,146 @@ export async function POST(request: NextRequest) {
     const { courseId, instructorId, room, date, startTime, endTime, capacity } = body;
     const { ip, userAgent } = requestMeta(request);
 
-    if (!courseId || !date || !startTime || !endTime) {
+    if (!courseId) {
       return NextResponse.json(
-        { success: false, error: 'Course, date, and session times are required' },
+        { success: false, error: 'Course is required' },
+        { status: 400 }
+      );
+    }
+
+    const { data: course } = await supabaseAdmin
+      .from('courses')
+      .select('id, code, name, category, training_center_id, capacity, duration_hours, theory_days, practical_days')
+      .eq('id', courseId)
+      .maybeSingle();
+
+    if (!course) {
+      return NextResponse.json({ success: false, error: 'Course not found' }, { status: 404 });
+    }
+
+    const isFullModular = isFullModularCourseRow(course);
+    const cleanInstructorId = instructorId ? String(instructorId).trim() : null;
+
+    // For Full Modular / In-House courses: assign instructor for Academic Record Review only
+    // and activate enrolled trainees WITHOUT creating a practical training date/schedule.
+    if (isFullModular) {
+      if (cleanInstructorId) {
+        try {
+          await supabaseAdmin
+            .from('course_instructors')
+            .upsert(
+              {
+                course_id: courseId,
+                instructor_id: cleanInstructorId,
+                assigned_at: new Date().toISOString(),
+              },
+              { onConflict: 'course_id,instructor_id' }
+            );
+
+          await supabaseAdmin
+            .from('batches')
+            .update({
+              instructor_id: cleanInstructorId,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('course_id', courseId);
+
+          await createNotificationRecord({
+            recipient_id: cleanInstructorId,
+            type: 'INSTRUCTOR_ASSIGNED',
+            category: 'SCHEDULE',
+            title: 'Assigned as Academic Record Reviewer',
+            message: `You have been assigned to review academic records and grades for ${course.name || 'Full Modular course'} (Full Modular / In-House — No Practical Date).`,
+            priority: 'MEDIUM',
+            entity_type: 'COURSE',
+            entity_id: courseId,
+            action_url: '/grades',
+          });
+        } catch (ciErr) {
+          console.warn('Notice: full modular course_instructors mapping:', ciErr);
+        }
+      }
+
+      let activatedTraineesCount = 0;
+      try {
+        const { data: targetEnrollments } = await supabaseAdmin
+          .from('enrollments')
+          .select('id, trainee_id, status')
+          .eq('course_id', courseId)
+          .in('status', ['APPROVED', 'ENROLLED']);
+
+        if (targetEnrollments && targetEnrollments.length > 0) {
+          const enrollmentIds = targetEnrollments.map((e: any) => e.id);
+          const traineeIds = Array.from(
+            new Set<string>(
+              targetEnrollments.map((e: any) => String(e.trainee_id || '')).filter(Boolean)
+            )
+          );
+
+          const { error: enrUpdateErr } = await supabaseAdmin
+            .from('enrollments')
+            .update({
+              status: 'ACTIVE',
+              enrolled_at: new Date().toISOString(),
+            })
+            .in('id', enrollmentIds);
+
+          if (!enrUpdateErr) {
+            activatedTraineesCount = targetEnrollments.length;
+          }
+
+          await supabaseAdmin
+            .from('trainees')
+            .update({ enrollment_status: 'ACTIVE' })
+            .in('profile_id', traineeIds);
+
+          await Promise.allSettled(
+            traineeIds.map((tId) =>
+              createNotificationRecord({
+                recipient_id: tId,
+                type: 'ENROLLMENT_ACTIVATED',
+                category: 'ENROLLMENT',
+                title: 'Full Modular Course Activated',
+                message: `Your Full Modular course (${course.name}) is now active! Complete your online modules and assessments within 3 days (no practical training date required).`,
+                priority: 'MEDIUM',
+                entity_type: 'COURSE',
+                entity_id: courseId,
+                action_url: '/learning',
+              })
+            )
+          );
+        }
+      } catch (actErr) {
+        console.warn('Notice: full modular trainee activation:', actErr);
+      }
+
+      await writeAdminAudit({
+        actorId: ctx.user.id,
+        action: 'MODULAR_REVIEWER_ASSIGNED',
+        entityType: 'COURSE',
+        entityId: courseId,
+        details: {
+          courseId,
+          instructorId: cleanInstructorId,
+          deliveryMode: 'FULL_MODULAR',
+          practicalDays: 0,
+          activatedTraineesCount,
+        },
+        ip,
+        userAgent,
+      });
+
+      return NextResponse.json({
+        success: true,
+        isFullModular: true,
+        activatedTraineesCount,
+        message: `Full Modular course assigned for Academic Record Review (no practical training date). ${activatedTraineesCount} trainee enrollment(s) activated.`,
+      });
+    }
+
+    if (!date || !startTime || !endTime) {
+      return NextResponse.json(
+        { success: false, error: 'Course, practical date, and session times are required' },
         { status: 400 }
       );
     }
@@ -143,19 +283,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { data: course } = await supabaseAdmin
-      .from('courses')
-      .select('id, name, training_center_id, capacity, duration_hours, theory_days, practical_days')
-      .eq('id', courseId)
-      .maybeSingle();
-
-    if (!course) {
-      return NextResponse.json({ success: false, error: 'Course not found' }, { status: 404 });
-    }
-
     const centerId = course.training_center_id || ctx.centerId;
     const roomName = (room || 'Main Hall').trim();
-    const cleanInstructorId = instructorId ? String(instructorId).trim() : null;
 
     // Calculate dates first
     const durationHours = Number(course.duration_hours || 40);

@@ -79,9 +79,20 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const resolvedModules = await resolveModuleLessonUrls(loadedModules);
     const procedures = await readProcedures(id);
 
-    const totalDays = Math.ceil((course.duration_hours || 40) / 8) || 1;
-    const theoryDays = course.theory_days ?? (totalDays <= 1 ? 1 : Math.max(1, Math.round(totalDays * 0.4)));
-    const practicalDays = course.practical_days ?? Math.max(0, totalDays - theoryDays);
+    const isFullModular =
+      String(course.category || '').toLowerCase().includes('in-house') ||
+      String(course.category || '').toLowerCase().includes('in house') ||
+      (String(course.category || '').toLowerCase().includes('modular') &&
+        !String(course.category || '').toLowerCase().includes('practical')) ||
+      (course.practical_days !== undefined && course.practical_days !== null && Number(course.practical_days) === 0);
+    const rawTotalDays = Math.ceil((course.duration_hours || 40) / 8) || 1;
+    const theoryDays = isFullModular
+      ? Math.min(3, rawTotalDays)
+      : (course.theory_days ?? (rawTotalDays <= 1 ? 1 : Math.max(1, Math.round(rawTotalDays * 0.4))));
+    const practicalDays = isFullModular
+      ? 0
+      : (course.practical_days ?? Math.max(0, rawTotalDays - theoryDays));
+    const totalDays = isFullModular ? theoryDays : theoryDays + practicalDays;
 
     return NextResponse.json({ 
       success: true, 
@@ -114,7 +125,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   try {
     const { data: existingCourse } = await supabaseAdmin
       .from('courses')
-      .select('id, training_center_id')
+      .select('id, training_center_id, category')
       .eq('id', id)
       .maybeSingle();
 
@@ -168,6 +179,17 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       if (!isNaN(pd) && pd >= 0) updates.practical_days = pd;
     }
 
+    const effectiveCat = String(updates.category ?? existingCourse.category ?? '').toLowerCase();
+    if (
+      effectiveCat.includes('in-house') ||
+      effectiveCat.includes('in house') ||
+      (effectiveCat.includes('modular') && !effectiveCat.includes('practical'))
+    ) {
+      updates.practical_days = 0;
+      const effHours = Number(updates.duration_hours ?? 24);
+      updates.theory_days = Math.min(3, Math.max(1, Math.ceil(effHours / 8)));
+    }
+
     const { data: updatedCourse, error } = await supabaseAdmin
       .from('courses')
       .update(updates)
@@ -202,7 +224,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   try {
     const { data: existingCourse } = await supabaseAdmin
       .from('courses')
-      .select('id, training_center_id')
+      .select('id, training_center_id, category')
       .eq('id', id)
       .maybeSingle();
 

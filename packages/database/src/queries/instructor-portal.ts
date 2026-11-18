@@ -1,6 +1,6 @@
 import { supabaseAdmin } from '../supabase';
 import { dispatchNotificationEvent, getUserNotifications, NOTIFICATION_EVENTS } from './notifications';
-import { calculateTraineeCourseGrade } from './grading';
+import { calculateTraineeCourseGrade, isInHouseModularCourse } from './grading';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const instructorCourseIdsCache = new Map<string, { expiresAt: number; promise: Promise<string[]> }>();
@@ -299,6 +299,15 @@ export async function getInstructorCoursesList(
 
   return courses.map((c: any) => {
     const centerName = (c.training_center_id && centerNameById.get(c.training_center_id)) || 'NEWSIM Talisay Training Center';
+    const isFullModular = isInHouseModularCourse(c.category, c.practical_days);
+    const durationHours = Number(c.duration_hours || 40);
+    const rawDays = Math.max(1, Math.ceil(durationHours / 8));
+    const theoryDays = isFullModular
+      ? Math.min(3, rawDays)
+      : Number(c.theory_days ?? (rawDays === 1 ? 1 : Math.max(1, Math.round(rawDays * 0.4))));
+    const practicalDays = isFullModular
+      ? 0
+      : Number(c.practical_days ?? (rawDays === 1 ? 0 : Math.max(0, rawDays - theoryDays)));
     return {
       id: c.id,
       code: c.code || '',
@@ -306,8 +315,12 @@ export async function getInstructorCoursesList(
       description: c.description || '',
       category: c.category || 'General Maritime',
       status: c.status || 'PUBLISHED',
-      durationHours: c.duration_hours || 40,
-      trainingDays: c.training_days || 5,
+      durationHours,
+      trainingDays: isFullModular ? theoryDays : theoryDays + practicalDays,
+      theoryDays,
+      practicalDays,
+      deliveryMode: isFullModular ? 'FULL_MODULAR' : 'MODULAR_AND_PRACTICAL',
+      requiresPractical: !isFullModular,
       capacity: c.capacity || 24,
       price: c.price || 0,
       centerName,
@@ -398,6 +411,16 @@ export async function getInstructorCourseDetails(courseId: string, profileId?: s
     if (tc?.name) centerName = tc.name;
   }
 
+  const isFullModular = isInHouseModularCourse(course.category, course.practical_days);
+  const durationHours = Number(course.duration_hours || 40);
+  const rawDays = Math.max(1, Math.ceil(durationHours / 8));
+  const theoryDays = isFullModular
+    ? Math.min(3, rawDays)
+    : Number(course.theory_days ?? (rawDays === 1 ? 1 : Math.max(1, Math.round(rawDays * 0.4))));
+  const practicalDays = isFullModular
+    ? 0
+    : Number(course.practical_days ?? (rawDays === 1 ? 0 : Math.max(0, rawDays - theoryDays)));
+
   return {
     id: course.id,
     code: course.code || '',
@@ -405,8 +428,12 @@ export async function getInstructorCourseDetails(courseId: string, profileId?: s
     description: course.description || '',
     category: course.category || 'General Maritime',
     status: course.status || 'PUBLISHED',
-    durationHours: course.duration_hours || 40,
-    trainingDays: course.training_days || 5,
+    durationHours,
+    trainingDays: isFullModular ? theoryDays : theoryDays + practicalDays,
+    theoryDays,
+    practicalDays,
+    deliveryMode: isFullModular ? 'FULL_MODULAR' : 'MODULAR_AND_PRACTICAL',
+    requiresPractical: !isFullModular,
     capacity: course.capacity || 24,
     centerName,
     enrolledCount: enrolledCount || 0,
@@ -414,7 +441,7 @@ export async function getInstructorCourseDetails(courseId: string, profileId?: s
     modules,
     materials,
     assessments: assessmentsData || [],
-    schedules: schedulesData || [],
+    schedules: isFullModular ? [] : (schedulesData || []),
   };
 }
 
@@ -1839,14 +1866,17 @@ export async function getInstructorSchedulesList(profileId?: string) {
 
   const { data: schedulesData, error } = await supabaseAdmin
     .from('schedules')
-    .select('*, courses(id, code, name, capacity, duration_hours, theory_days, practical_days), training_centers(name), instructors(profiles(first_name, last_name, avatar_url))')
+    .select('*, courses(id, code, name, category, capacity, duration_hours, theory_days, practical_days), training_centers(name), instructors(profiles(first_name, last_name, avatar_url))')
     .or(`instructor_id.eq.${resolvedId},substitute_instructor_id.eq.${resolvedId}`)
     .neq('status', 'CANCELLED')
     .order('start_at', { ascending: true });
 
   if (error) throw error;
 
-  let schedules = schedulesData || [];
+  // Full modular courses have no practical training dates or schedules
+  let schedules = (schedulesData || []).filter(
+    (s: any) => !isInHouseModularCourse(s.courses?.category, s.courses?.practical_days)
+  );
   if (schedules.length === 0) {
     return [];
   }

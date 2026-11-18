@@ -385,10 +385,24 @@ export default function SchedulesClient() {
   const isSelectedCourseOngoing = Boolean(formData.courseId && ongoingCourseIds.has(formData.courseId));
 
   const selectedCourse = courses.find((c) => c.id === formData.courseId);
+  const selectedCourseCat = String(selectedCourse?.category || '').toLowerCase();
+  const isSelectedCourseFullModular = Boolean(
+    selectedCourse &&
+      (selectedCourse.isFullModular ||
+        selectedCourseCat.includes('in-house') ||
+        selectedCourseCat.includes('in house') ||
+        (selectedCourseCat.includes('modular') && !selectedCourseCat.includes('practical')) ||
+        (selectedCourse.practicalDays !== undefined && Number(selectedCourse.practicalDays) === 0) ||
+        (selectedCourse.practical_days !== undefined && Number(selectedCourse.practical_days) === 0))
+  );
   const selectedDurationHours = Number(selectedCourse?.durationHours || selectedCourse?.duration_hours || 40);
   const selectedDurationDays = Math.max(1, Math.ceil(selectedDurationHours / 8));
-  const selectedTheoryDays = Number(selectedCourse?.theoryDays ?? selectedCourse?.theory_days ?? (selectedDurationDays === 1 ? 1 : Math.max(1, Math.round(selectedDurationDays * 0.4))));
-  const selectedPracticalDays = Number(selectedCourse?.practicalDays ?? selectedCourse?.practical_days ?? (selectedDurationDays === 1 ? 0 : Math.max(0, selectedDurationDays - selectedTheoryDays)));
+  const selectedTheoryDays = isSelectedCourseFullModular
+    ? Math.min(3, selectedDurationDays)
+    : Number(selectedCourse?.theoryDays ?? selectedCourse?.theory_days ?? (selectedDurationDays === 1 ? 1 : Math.max(1, Math.round(selectedDurationDays * 0.4))));
+  const selectedPracticalDays = isSelectedCourseFullModular
+    ? 0
+    : Number(selectedCourse?.practicalDays ?? selectedCourse?.practical_days ?? (selectedDurationDays === 1 ? 0 : Math.max(0, selectedDurationDays - selectedTheoryDays)));
   const selectedTotalDays = Math.max(1, selectedTheoryDays + selectedPracticalDays);
   const calculatedEndDate = computeEndDate(formData.date, selectedTotalDays);
 
@@ -978,79 +992,105 @@ export default function SchedulesClient() {
                     })()}
                   </div>
                   <div>
-                    <label className="block text-slate-600 dark:text-[#CBD5E1] font-mono uppercase text-[10px] mb-1">Classroom / Simulator Suite</label>
-                    <input
-                      type="text"
-                      required
-                      value={formData.room}
-                      onChange={(e) => setFormData({ ...formData, room: e.target.value })}
-                      placeholder="e.g. Bridge Simulator Alpha"
-                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-[#F8FAFC] outline-none font-mono"
-                    />
+                    <label className="block text-slate-600 dark:text-[#CBD5E1] font-mono uppercase text-[10px] mb-1">
+                      {isSelectedCourseFullModular ? 'Training Mode' : 'Classroom / Simulator Suite'}
+                    </label>
+                    {isSelectedCourseFullModular ? (
+                      <div className="w-full px-3 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800/60 text-indigo-700 dark:text-indigo-300 font-mono font-bold text-[11px]">
+                        Full Modular Online (No Practical Room)
+                      </div>
+                    ) : (
+                      <input
+                        type="text"
+                        required
+                        value={formData.room}
+                        onChange={(e) => setFormData({ ...formData, room: e.target.value })}
+                        placeholder="e.g. Bridge Simulator Alpha"
+                        className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-[#F8FAFC] outline-none font-mono"
+                      />
+                    )}
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-3">
-                  <div>
-                    <label className="block text-slate-600 dark:text-[#CBD5E1] font-mono uppercase text-[10px] mb-1">Date Started (Day 1) *</label>
-                    <input
-                      type="date"
-                      required
-                      value={formData.date}
-                      onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-[#F8FAFC] outline-none font-mono"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-slate-600 dark:text-[#CBD5E1] font-mono uppercase text-[10px] mb-1">Daily Start Time</label>
-                    <select
-                      value={formData.startTime}
-                      onChange={(e) => setFormData({ ...formData, startTime: e.target.value })}
-                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-[#F8FAFC] outline-none font-mono"
-                    >
-                      <option>08:00 AM</option>
-                      <option>10:00 AM</option>
-                      <option>01:00 PM</option>
-                      <option>03:00 PM</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-slate-600 dark:text-[#CBD5E1] font-mono uppercase text-[10px] mb-1">Daily End Time</label>
-                    <select
-                      value={formData.endTime}
-                      onChange={(e) => setFormData({ ...formData, endTime: e.target.value })}
-                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-[#F8FAFC] outline-none font-mono"
-                    >
-                      <option>12:00 PM</option>
-                      <option>02:00 PM</option>
-                      <option>05:00 PM</option>
-                      <option>07:00 PM</option>
-                    </select>
-                  </div>
-                </div>
+                {!isSelectedCourseFullModular ? (
+                  <>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-slate-600 dark:text-[#CBD5E1] font-mono uppercase text-[10px] mb-1">Practical Date (Day 1) *</label>
+                        <input
+                          type="date"
+                          required
+                          value={formData.date}
+                          onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                          className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-[#F8FAFC] outline-none font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-600 dark:text-[#CBD5E1] font-mono uppercase text-[10px] mb-1">Daily Start Time</label>
+                        <select
+                          value={formData.startTime}
+                          onChange={(e) => setFormData({ ...formData, startTime: e.target.value })}
+                          className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-[#F8FAFC] outline-none font-mono"
+                        >
+                          <option>08:00 AM</option>
+                          <option>10:00 AM</option>
+                          <option>01:00 PM</option>
+                          <option>03:00 PM</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-slate-600 dark:text-[#CBD5E1] font-mono uppercase text-[10px] mb-1">Daily End Time</label>
+                        <select
+                          value={formData.endTime}
+                          onChange={(e) => setFormData({ ...formData, endTime: e.target.value })}
+                          className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-[#F8FAFC] outline-none font-mono"
+                        >
+                          <option>12:00 PM</option>
+                          <option>02:00 PM</option>
+                          <option>05:00 PM</option>
+                          <option>07:00 PM</option>
+                        </select>
+                      </div>
+                    </div>
 
-                {/* Course Finish Period Preview */}
-                <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 space-y-1.5 font-mono text-[11px]">
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-400 uppercase text-[10px] font-bold">Calculated Course Finish Schedule</span>
-                    <span className="px-2 py-0.5 rounded font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-[10px]">
-                      {selectedTotalDays} Day{selectedTotalDays > 1 ? 's' : ''} to Finish
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-200/60 dark:border-slate-800">
-                    <div>
-                      <span className="text-slate-400 block text-[9px] uppercase font-bold">Date Started (Day 1)</span>
-                      <strong className="text-slate-900 dark:text-white text-xs">{formData.date}</strong>
+                    {/* Course Finish Period Preview */}
+                    <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 space-y-1.5 font-mono text-[11px]">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400 uppercase text-[10px] font-bold">Calculated Course Finish Schedule</span>
+                        <span className="px-2 py-0.5 rounded font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-[10px]">
+                          {selectedTotalDays} Day{selectedTotalDays > 1 ? 's' : ''} to Finish
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-200/60 dark:border-slate-800">
+                        <div>
+                          <span className="text-slate-400 block text-[9px] uppercase font-bold">Date Started (Day 1)</span>
+                          <strong className="text-slate-900 dark:text-white text-xs">{formData.date}</strong>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 block text-[9px] uppercase font-bold">Date End (Completion)</span>
+                          <strong className="text-emerald-600 dark:text-emerald-400 text-xs">{calculatedEndDate}</strong>
+                        </div>
+                      </div>
+                      <div className="text-[10px] text-slate-500 pt-1 border-t border-slate-200/40 dark:border-slate-800">
+                        Course partition: <strong>{selectedTheoryDays} day(s)</strong> of theory modules + <strong>{selectedPracticalDays} day(s)</strong> of practical training ({selectedDurationHours}h total).
+                      </div>
                     </div>
-                    <div>
-                      <span className="text-slate-400 block text-[9px] uppercase font-bold">Date End (Completion)</span>
-                      <strong className="text-emerald-600 dark:text-emerald-400 text-xs">{calculatedEndDate}</strong>
+                  </>
+                ) : (
+                  <div className="p-3.5 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800/60 space-y-1.5 font-mono text-[11px]">
+                    <div className="flex items-center justify-between">
+                      <span className="text-indigo-700 dark:text-indigo-300 uppercase text-[10px] font-bold">
+                        Full Modular / In-House Course (No Practical Date)
+                      </span>
+                      <span className="px-2 py-0.5 rounded font-bold bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border border-indigo-500/30 text-[10px]">
+                        0 Practical Days
+                      </span>
                     </div>
+                    <p className="text-[10px] text-slate-600 dark:text-slate-300 leading-relaxed pt-1 border-t border-indigo-200/50 dark:border-indigo-800/40">
+                      This course is <strong>100% Modular</strong> (maximum {selectedTheoryDays}-day online completion window). No practical training date or physical attendance is generated; the assigned instructor acts strictly as the <strong>Academic Record Reviewer</strong>.
+                    </p>
                   </div>
-                  <div className="text-[10px] text-slate-500 pt-1 border-t border-slate-200/40 dark:border-slate-800">
-                    Course partition: <strong>{selectedTheoryDays} day(s)</strong> of theory modules + <strong>{selectedPracticalDays} day(s)</strong> of practical training ({selectedDurationHours}h total).
-                  </div>
-                </div>
+                )}
 
                 <div className="pt-4 border-t border-slate-200 dark:border-slate-800 flex justify-end gap-2">
                   <button

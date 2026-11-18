@@ -1,6 +1,6 @@
 import { supabaseAdmin } from '../supabase';
 import { dispatchNotificationEvent, NOTIFICATION_EVENTS } from './notifications';
-import { calculateTraineeCourseGrade } from './grading';
+import { calculateTraineeCourseGrade, isInHouseModularCourse } from './grading';
 import { getInstructorCourseIds } from './instructor-portal';
 
 export interface AttendanceRosterItem {
@@ -91,18 +91,36 @@ export async function getInstructorAttendanceOptions(instructorProfileId: string
       .order('start_at', { ascending: false }),
   ]);
 
-  const courses = (coursesRes.data || []).map((c: any) => {
-    const durationHours = Number(c.duration_hours || 40);
-    const durationDays = Math.max(1, Math.ceil(durationHours / 8));
-    const theoryDays = Number(c.theory_days ?? (durationDays === 1 ? 1 : Math.max(1, Math.round(durationDays * 0.4))));
-    const practicalDays = Number(c.practical_days ?? (durationDays === 1 ? 0 : Math.max(0, durationDays - theoryDays)));
-    return {
-      ...c,
-      duration_hours: durationHours,
-      theory_days: theoryDays,
-      practical_days: practicalDays,
-    };
-  });
+  const fullModularCourseIds = new Set<string>();
+  const courses = (coursesRes.data || [])
+    .map((c: any) => {
+      const durationHours = Number(c.duration_hours || 40);
+      const durationDays = Math.max(1, Math.ceil(durationHours / 8));
+      const isFullModular = isInHouseModularCourse(c.category, c.practical_days);
+      if (isFullModular) {
+        fullModularCourseIds.add(c.id);
+      }
+      const theoryDays = isFullModular
+        ? Math.min(3, durationDays)
+        : Number(c.theory_days ?? (durationDays === 1 ? 1 : Math.max(1, Math.round(durationDays * 0.4))));
+      const practicalDays = isFullModular
+        ? 0
+        : Number(c.practical_days ?? (durationDays === 1 ? 0 : Math.max(0, durationDays - theoryDays)));
+      return {
+        ...c,
+        duration_hours: durationHours,
+        theory_days: theoryDays,
+        practical_days: practicalDays,
+        is_full_modular: isFullModular,
+        delivery_mode: isFullModular ? 'FULL_MODULAR' : 'MODULAR_AND_PRACTICAL',
+      };
+    })
+    .sort((a: any, b: any) => {
+      if (Boolean(a.is_full_modular) !== Boolean(b.is_full_modular)) {
+        return a.is_full_modular ? 1 : -1;
+      }
+      return String(a.code || '').localeCompare(String(b.code || ''));
+    });
 
   // Filter batches to those assigned to instructor or where instructor is on course
   const filteredBatches = (batchesRes.data || [])
@@ -112,10 +130,15 @@ export async function getInstructorAttendanceOptions(instructorProfileId: string
       batch_number: b.batch_code,
     }));
 
+  // Full modular courses must never expose practical schedules
+  const filteredSchedules = (schedulesRes.data || []).filter(
+    (s: any) => !fullModularCourseIds.has(s.course_id)
+  );
+
   return {
     courses: courses || [],
     batches: filteredBatches,
-    schedules: schedulesRes.data || [],
+    schedules: filteredSchedules,
   };
 }
 
@@ -443,6 +466,18 @@ export async function saveInstructorBatchAttendance(params: {
   const assignedCourseIds = await getInstructorCourseIds(instructorProfileId);
   if (!assignedCourseIds.includes(courseId)) {
     throw new Error('FORBIDDEN: Instructor is not assigned to record attendance for this course.');
+  }
+
+  const { data: targetCourseRow } = await supabaseAdmin
+    .from('courses')
+    .select('id, code, name, category, practical_days')
+    .eq('id', courseId)
+    .maybeSingle();
+
+  if (targetCourseRow && isInHouseModularCourse(targetCourseRow.category, targetCourseRow.practical_days)) {
+    throw new Error(
+      'Full Modular / In-House courses do not have practical training dates or physical attendance requirements.'
+    );
   }
 
   let resolvedBatchId = params.batchId || null;

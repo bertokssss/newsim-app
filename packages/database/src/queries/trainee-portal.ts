@@ -1283,14 +1283,15 @@ export async function getTraineeCoursesList(traineeId: string, search?: string, 
       : Math.min(totalLessons, completedMap.get(courseId) || 0);
 
     const failedModules = dailyFailedCountMap.get(courseId) || 0;
-    const isInHouse = isInHouseModularCourse(c.category);
+    const isInHouse = isInHouseModularCourse(c.category, c.practical_days);
     const requiresPractical = !isInHouse;
     const isPracticalCompetent = isInHouse ? true : practicalCompetentSet.has(courseId);
     const isPostTestPassed = postTestPassedSet.has(courseId);
 
-    const totalDays = Math.ceil((c.duration_hours || 40) / 8) || 1;
-    const theoryDays = isInHouse ? totalDays : (c.theory_days ?? (totalDays <= 1 ? 1 : Math.max(1, Math.round(totalDays * 0.4))));
-    const practicalDays = isInHouse ? 0 : (c.practical_days ?? Math.max(0, totalDays - theoryDays));
+    const rawTotalDays = Math.ceil((c.duration_hours || 40) / 8) || 1;
+    const theoryDays = isInHouse ? Math.min(3, rawTotalDays) : (c.theory_days ?? (rawTotalDays <= 1 ? 1 : Math.max(1, Math.round(rawTotalDays * 0.4))));
+    const practicalDays = isInHouse ? 0 : (c.practical_days ?? Math.max(0, rawTotalDays - theoryDays));
+    const totalDays = isInHouse ? theoryDays : theoryDays + practicalDays;
     const practicalAttended = isInHouse ? 0 : (practicalAttendedMap.get(courseId) || 0);
 
     const hasPostTest = courseWithPostTestSet.has(courseId);
@@ -1532,7 +1533,7 @@ export async function getTraineeSchedulesList(traineeId: string, onNotifyEmail?:
   // Fetch trainee's enrolled course IDs (excluding cancelled/rejected enrollments)
   const { data: enrollments } = await supabaseAdmin
     .from('enrollments')
-    .select('course_id, status, courses ( id, code, name )')
+    .select('course_id, status, courses ( id, code, name, category, practical_days )')
     .eq('trainee_id', resolvedId);
 
   const validEnrollments = (enrollments || []).filter((e: any) => {
@@ -1540,7 +1541,15 @@ export async function getTraineeSchedulesList(traineeId: string, onNotifyEmail?:
     return ['ENROLLED', 'ACTIVE', 'ONGOING', 'APPROVED', 'COMPLETED'].includes(s);
   });
 
-  const courseIds = Array.from(new Set(validEnrollments.map((e: any) => e.course_id).filter(Boolean))) as string[];
+  // Only Modular + Practical courses can have practical training dates/schedules
+  const practicalCourseIds = Array.from(
+    new Set(
+      validEnrollments
+        .filter((e: any) => !isInHouseModularCourse(e.courses?.category, e.courses?.practical_days))
+        .map((e: any) => e.course_id)
+        .filter(Boolean)
+    )
+  ) as string[];
 
   // 1. Fetch practical schedules
   const { data: attendances } = await supabaseAdmin
@@ -1554,10 +1563,10 @@ export async function getTraineeSchedulesList(traineeId: string, onNotifyEmail?:
   );
 
   let schedData: any[] = [];
-  if (courseIds.length > 0 || directScheduleIds.length > 0) {
+  if (practicalCourseIds.length > 0 || directScheduleIds.length > 0) {
     const scheduleSelect = `
         *,
-        courses (id, code, name),
+        courses (id, code, name, category, practical_days),
         instructors (
           profile_id,
           profiles (first_name, last_name, avatar_url)
@@ -1565,11 +1574,11 @@ export async function getTraineeSchedulesList(traineeId: string, onNotifyEmail?:
         training_centers (name)
       `;
     const [byCourseRes, bySchedRes] = await Promise.all([
-      courseIds.length > 0
+      practicalCourseIds.length > 0
         ? supabaseAdmin
             .from('schedules')
             .select(scheduleSelect)
-            .in('course_id', courseIds)
+            .in('course_id', practicalCourseIds)
             .neq('status', 'CANCELLED')
             .order('start_at', { ascending: true })
         : Promise.resolve({ data: [] as any[] }),
@@ -1585,7 +1594,7 @@ export async function getTraineeSchedulesList(traineeId: string, onNotifyEmail?:
 
     const mergedMap = new Map<string, any>();
     for (const row of [...(byCourseRes.data || []), ...(bySchedRes.data || [])]) {
-      if (row?.id && !mergedMap.has(row.id)) {
+      if (row?.id && !mergedMap.has(row.id) && !isInHouseModularCourse(row.courses?.category, row.courses?.practical_days)) {
         mergedMap.set(row.id, row);
       }
     }
@@ -3353,7 +3362,7 @@ export async function getTraineeLearningMaterials(
     .eq('id', targetCourseId)
     .maybeSingle();
 
-  const isInHouse = isInHouseModularCourse(course?.category);
+  const isInHouse = isInHouseModularCourse(course?.category, course?.practical_days);
   const requiresPractical = !isInHouse;
 
   // Fetch completions for this trainee and course
@@ -3668,9 +3677,10 @@ export async function getTraineeLearningMaterials(
 
   // Attach postTest and schedule partition to the returned array for convenient access
   (lessons as any).postTest = postTestObj;
-  const totalDays = Math.ceil((course?.duration_hours || 40) / 8) || 1;
-  const theoryDays = isInHouse ? totalDays : (course?.theory_days ?? (totalDays <= 1 ? 1 : Math.max(1, Math.round(totalDays * 0.4))));
-  const practicalDays = isInHouse ? 0 : (course?.practical_days ?? Math.max(0, totalDays - theoryDays));
+  const rawTotalDays = Math.ceil((course?.duration_hours || 40) / 8) || 1;
+  const theoryDays = isInHouse ? Math.min(3, rawTotalDays) : (course?.theory_days ?? (rawTotalDays <= 1 ? 1 : Math.max(1, Math.round(rawTotalDays * 0.4))));
+  const practicalDays = isInHouse ? 0 : (course?.practical_days ?? Math.max(0, rawTotalDays - theoryDays));
+  const totalDays = isInHouse ? theoryDays : theoryDays + practicalDays;
   (lessons as any).schedulePartition = {
     totalDays,
     theoryDays,

@@ -56,13 +56,27 @@ export interface CourseGradeBreakdown {
  * In-House Courses are 100% modular (lessons + modular written assessments) with no practical phase.
  * Safety and Other STCW Courses have modular lessons followed by a course-specific practical assessment.
  */
-export function isInHouseModularCourse(category?: string | null): boolean {
+export function isInHouseModularCourse(category?: string | null, practicalDays?: number | null): boolean {
   const norm = String(category || '').trim().toLowerCase();
-  return norm === 'in-house courses' || norm === 'in-house' || norm.includes('in-house');
+  if (
+    norm === 'in-house courses' ||
+    norm === 'in-house' ||
+    norm.includes('in-house') ||
+    norm.includes('in house') ||
+    (norm.includes('modular') && !norm.includes('practical')) ||
+    norm.includes('online') ||
+    norm.includes('theoretical')
+  ) {
+    return true;
+  }
+  if (practicalDays !== undefined && practicalDays !== null && Number(practicalDays) === 0) {
+    return true;
+  }
+  return false;
 }
 
-export function courseRequiresPractical(category?: string | null): boolean {
-  return !isInHouseModularCourse(category);
+export function courseRequiresPractical(category?: string | null, practicalDays?: number | null): boolean {
+  return !isInHouseModularCourse(category, practicalDays);
 }
 
 /**
