@@ -84,9 +84,9 @@ export default function LearningClient() {
           const match = json.data.find((l: any) => l.id === initialLessonId);
           setActiveLesson(match || json.data[0]);
         } else {
-          // Default to first incomplete lesson or first lesson
-          const firstIncomplete = json.data.find((l: any) => !l.isCompleted);
-          setActiveLesson(firstIncomplete || json.data[0]);
+          // Default to first incomplete unlocked lesson or first lesson
+          const firstIncomplete = json.data.find((l: any) => !l.isCompleted && !l.isLocked);
+          setActiveLesson(firstIncomplete || json.data.find((l: any) => !l.isLocked) || json.data[0]);
         }
       }
     } catch (err) {
@@ -102,7 +102,15 @@ export default function LearningClient() {
 
 
   const handleMarkComplete = async () => {
-    if (!activeLesson || activeLesson.isRead) return;
+    if (!activeLesson) return;
+    if (activeLesson.isRead) {
+      const assessmentId = activeLesson.moduleAssessment?.id;
+      const courseId = activeLesson.courseId || rawCourseId;
+      if (assessmentId && !activeLesson.moduleAssessment?.isAttempted) {
+        router.push(`/assessments?assessmentId=${assessmentId}&courseId=${courseId}`);
+      }
+      return;
+    }
     try {
       setCompleting(true);
       const res = await fetch('/api/trainee/learning', {
@@ -290,12 +298,12 @@ export default function LearningClient() {
 
           <button
             onClick={handleMarkComplete}
-            disabled={activeLesson?.isRead || completing}
+            disabled={activeLesson?.isCompleted || completing}
             className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl font-bold text-xs shadow-md transition-all ${
               activeLesson?.isCompleted
                 ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 cursor-default'
                 : activeLesson?.isRead
-                ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30 cursor-default'
+                ? 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-700 dark:text-amber-400 border border-amber-500/30 cursor-pointer'
                 : 'bg-sky-600 hover:bg-sky-700 text-white shadow-sky-500/20 cursor-pointer'
             }`}
           >
@@ -307,7 +315,7 @@ export default function LearningClient() {
             ) : activeLesson?.isRead ? (
               <>
                 <Unlock className="w-4 h-4 text-amber-500" />
-                <span>Read • Assessment Open</span>
+                <span>Read • Open Assessment →</span>
               </>
             ) : completing ? (
               <span>Unlocking Assessment...</span>
@@ -433,16 +441,16 @@ export default function LearningClient() {
                         Day {lesson.dayNumber || idx + 1}. {lesson.title}
                       </p>
                       <span className="text-[10px] font-mono text-slate-500 block mt-0.5">
-                        {lesson.isFailed
-                          ? '❌ FAILED (Missed daily completion)'
-                          : lesson.isDueToday
-                          ? '🔔 Due Today (Complete before 11:59 PM)'
-                          : lesson.isLocked
-                          ? `🔒 Locked (${lesson.formattedDate || 'Future Day'})`
-                          : lesson.isCompleted
+                        {lesson.isCompleted
                           ? '✓ Completed'
                           : lesson.isRead
                           ? 'Assessment Ready'
+                          : lesson.isFailed
+                          ? `Assessment Not Passed (${lesson.moduleAssessment?.score ?? 0}%)`
+                          : lesson.isLocked
+                          ? `🔒 Locked (Complete previous module)`
+                          : lesson.isDueToday
+                          ? 'Unlocked • Ready to Start'
                           : 'Theory Guide'} • {lesson.readingMinutes || 45} mins
                       </span>
                     </div>

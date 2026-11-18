@@ -2978,6 +2978,8 @@ export async function syncTraineeDailyModules(
     .select('id, enrolled_at, created_at, batch_id, batches ( id, start_date )')
     .eq('trainee_id', resolvedId)
     .eq('course_id', courseId)
+    .order('enrolled_at', { ascending: false })
+    .limit(1)
     .maybeSingle();
 
   // 5. Current date in Manila timezone
@@ -2993,23 +2995,20 @@ export async function syncTraineeDailyModules(
   const trackingMap = new Map<string, any>();
   (existingTracking || []).forEach((t: any) => trackingMap.set(t.module_id, t));
 
-  // Determine course start date
-  let startDate = todayStr;
+  // Determine course start date: never use a batch start_date in the past before the trainee enrolled or before today
+  const enrolledDateStr = enrollment?.enrolled_at
+    ? formatManilaDate(new Date(enrollment.enrolled_at))
+    : todayStr;
   const batchStart = (enrollment?.batches as any)?.start_date;
-  if (batchStart) {
+  let startDate = todayStr;
+  if (batchStart && batchStart >= enrolledDateStr && batchStart >= todayStr) {
     startDate = batchStart;
-  } else if (enrollment?.enrolled_at) {
-    startDate = formatManilaDate(new Date(enrollment.enrolled_at));
+  } else if (enrolledDateStr >= todayStr) {
+    startDate = enrolledDateStr;
   }
 
-  // 7. Fetch trainee lesson reading completions
-  const { data: completions } = await supabaseAdmin
-    .from('trainee_lesson_completions')
-    .select('module_id, lesson_id')
-    .eq('trainee_id', resolvedId)
-    .eq('course_id', courseId);
-
-  const completedModuleIds = new Set((completions || []).map((c: any) => c.module_id));
+  // 7. Fetch trainee lesson reading completions (resolves module_id, les-<moduleId>, and material IDs)
+  const completedModuleIds = await getReadModuleIds(resolvedId, [courseId]);
 
   // 8. Fetch assessments and attempts for this course
   const { data: assessments } = await supabaseAdmin
@@ -3022,14 +3021,35 @@ export async function syncTraineeDailyModules(
     if (a.module_id) asmMap.set(a.module_id, a);
   });
 
-  const { data: attempts } = await supabaseAdmin
+  const { data: rawAttempts } = await supabaseAdmin
     .from('assessment_attempts')
-    .select('assessment_id, score, passed, status, submitted_at')
+    .select('id, assessment_id, score, passed, status, started_at, submitted_at')
     .eq('trainee_id', resolvedId)
     .order('submitted_at', { ascending: false });
 
+  // Filter out and clean up any synthetic auto-failed deadline rows (score=0, submitted_at ending in :59:59)
+  const syntheticAttemptIds: string[] = [];
+  const attempts = (rawAttempts || []).filter((att: any) => {
+    const isSyntheticDeadlineFail =
+      Number(att.score) === 0 &&
+      att.status === 'FAILED' &&
+      String(att.submitted_at || '').includes('59:59');
+    if (isSyntheticDeadlineFail && att.id) {
+      syntheticAttemptIds.push(att.id);
+      return false;
+    }
+    return true;
+  });
+  if (syntheticAttemptIds.length > 0) {
+    supabaseAdmin
+      .from('assessment_attempts')
+      .delete()
+      .in('id', syntheticAttemptIds)
+      .then(() => {}, () => {});
+  }
+
   const attemptsByAsm = new Map<string, any>();
-  (attempts || []).forEach((att: any) => {
+  attempts.forEach((att: any) => {
     if (!attemptsByAsm.has(att.assessment_id) || att.passed === true || att.status === 'PASSED') {
       attemptsByAsm.set(att.assessment_id, att);
     }
@@ -3037,12 +3057,18 @@ export async function syncTraineeDailyModules(
 
   const results: DailyModuleSyncResult[] = [];
   const trackingUpserts: any[] = [];
+  let previousModuleDone = true;
 
   for (let i = 0; i < modules.length; i++) {
     const mod = modules[i];
     const dayNumber = i + 1;
     const existingRow = trackingMap.get(mod.id);
-    const scheduledDate = existingRow?.scheduled_date || addDaysToDateString(startDate, i);
+    const existingSched = existingRow?.scheduled_date;
+    // Keep completed module's date; for incomplete modules, ensure scheduledDate is anchored to startDate (not a past batch date)
+    const scheduledDate =
+      existingSched && (existingRow?.status === 'COMPLETED' || existingSched >= startDate)
+        ? existingSched
+        : addDaysToDateString(startDate, i);
     const formattedDate = formatReadableDateString(scheduledDate);
 
     const modAsm = asmMap.get(mod.id);
@@ -3065,71 +3091,11 @@ export async function syncTraineeDailyModules(
     } else if (isAsmFailed) {
       status = 'FAILED';
       failureReason = `Failed module assessment (scored ${asmAttempt?.score ?? 0}%, minimum ${passingScore}% required)`;
-    } else if (scheduledDate < todayStr) {
-      // Scheduled day has elapsed without passing -> AUTOMATIC FAILURE
-      status = 'FAILED';
-      failureReason = `Missed daily completion deadline on ${scheduledDate}`;
-
-      // Insert failed attempt record if no attempt exists yet
-      if (!asmAttempt && modAsm?.id) {
-        try {
-          await supabaseAdmin.from('assessment_attempts').insert({
-            assessment_id: modAsm.id,
-            trainee_id: resolvedId,
-            attempt_number: 1,
-            score: 0,
-            status: 'FAILED',
-            passed: false,
-            started_at: new Date(scheduledDate + 'T23:59:59+08:00').toISOString(),
-            submitted_at: new Date(scheduledDate + 'T23:59:59+08:00').toISOString(),
-          });
-        } catch {}
-      }
-
-      // Notify of failure if not already notified
-      if (!existingRow?.failed_at) {
-        if (onNotifyEmail && traineeEmail) {
-          try {
-            await onNotifyEmail({
-              type: 'MODULE_FAILED',
-              traineeEmail,
-              traineeName,
-              courseTitle,
-              moduleTitle: mod.title,
-              dayNumber,
-              scheduledDate,
-              reason: 'Missed daily completion deadline',
-            });
-          } catch {}
-        }
-        await dispatchNotificationEvent({
-          event: NOTIFICATION_EVENTS.TRAINEE_FALLING_BEHIND,
-          traineeId: resolvedId,
-          courseId,
-          entityType: 'MODULE',
-          entityId: mod.id,
-          priority: 'HIGH',
-          category: 'PROGRESS',
-          metadata: {
-            dayNumber,
-            moduleTitle: mod.title,
-            scheduledDate,
-          },
-          roleOverrides: {
-            TRAINEE: {
-              title: `Notice: Module Marked as FAILED - ${mod.title}`,
-              message: `You did not complete Day ${dayNumber} (${mod.title}) on its scheduled date (${scheduledDate}). Under STCW daily progression guidelines, this module is automatically failed.`,
-              actionUrl: `/learning?courseId=${courseId}`,
-            },
-          },
-        }).catch(() => {});
-      }
-    } else if (scheduledDate === todayStr) {
-      // TODAY! Module is unlocked and available
+    } else if (i === 0 || previousModuleDone) {
+      // Unlock Module 1 immediately and unlock each subsequent module as soon as the previous module is completed
       status = 'AVAILABLE';
 
-      // Send email notification if not yet sent today
-      if (!existingRow?.email_notified_at) {
+      if (!existingRow?.email_notified_at && scheduledDate === todayStr) {
         if (onNotifyEmail && traineeEmail) {
           try {
             await onNotifyEmail({
@@ -3160,10 +3126,11 @@ export async function syncTraineeDailyModules(
         }).catch(() => {});
       }
     } else {
-      // Future day
       status = 'LOCKED';
-      lockReason = `Locked: Scheduled for Day ${dayNumber} (${formattedDate}). Under daily pacing rules, 1 module unlocks per day.`;
+      lockReason = `Locked: Complete Day ${i} first to unlock Day ${dayNumber} (${formattedDate}).`;
     }
+
+    previousModuleDone = status === 'COMPLETED' || status === 'FAILED' || isRead;
 
     trackingUpserts.push({
       trainee_id: resolvedId,
@@ -3252,14 +3219,29 @@ export async function getTraineeLearningMaterials(
     }
   }
 
-  // Access control check: Trainee must be in ENROLLED, ACTIVE, APPROVED, or COMPLETED status
-  const { data: enrollment } = await supabaseAdmin
+  // Access control check: Trainee must have an enrollment in this course
+  let { data: enrollment } = await supabaseAdmin
     .from('enrollments')
     .select('id, status, batch_id, batches ( id, instructor_id )')
     .eq('course_id', targetCourseId)
     .eq('trainee_id', resolvedId)
     .in('status', ['ENROLLED', 'ACTIVE', 'APPROVED', 'COMPLETED'])
+    .order('enrolled_at', { ascending: false })
+    .limit(1)
     .maybeSingle();
+
+  if (!enrollment) {
+    const { data: fallbackEnr } = await supabaseAdmin
+      .from('enrollments')
+      .select('id, status, batch_id, batches ( id, instructor_id )')
+      .eq('course_id', targetCourseId)
+      .eq('trainee_id', resolvedId)
+      .neq('status', 'CANCELLED')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    enrollment = fallbackEnr;
+  }
 
   if (!enrollment) {
     return [];
@@ -3315,11 +3297,15 @@ export async function getTraineeLearningMaterials(
   // Fetch completions for this trainee and course
   const { data: completions } = await supabaseAdmin
     .from('trainee_lesson_completions')
-    .select('lesson_id')
+    .select('lesson_id, module_id')
     .eq('trainee_id', resolvedId)
     .eq('course_id', targetCourseId);
 
-  const completedSet = new Set((completions || []).map((c: any) => c.lesson_id));
+  const completedSet = new Set<string>();
+  (completions || []).forEach((c: any) => {
+    if (c.lesson_id) completedSet.add(String(c.lesson_id));
+    if (c.module_id) completedSet.add(String(c.module_id));
+  });
 
   // Fetch course modules and their learning materials
   const { data: modules, error } = await supabaseAdmin
@@ -3373,6 +3359,13 @@ export async function getTraineeLearningMaterials(
       .order('submitted_at', { ascending: false });
 
     attempts?.forEach((att: any) => {
+      if (
+        Number(att.score) === 0 &&
+        att.status === 'FAILED' &&
+        String(att.submitted_at || '').includes('59:59')
+      ) {
+        return;
+      }
       if (!attemptsMap.has(att.assessment_id) || att.status === 'PASSED') {
         attemptsMap.set(att.assessment_id, att);
       }
@@ -3492,7 +3485,7 @@ export async function getTraineeLearningMaterials(
         for (const mat of materials) {
           const desc = mat.description || 'Official curriculum learning material and maritime study guide.';
           const isPassed = modQuiz ? Boolean(modQuiz.isPassed) : true;
-          const isRead = completedSet.has(mat.id) || isPassed;
+          const isRead = completedSet.has(mat.id) || completedSet.has(m.id) || completedSet.has(`les-${m.id}`) || isPassed;
           const isCompleted = dailyStatus === 'COMPLETED' || (isRead && isPassed);
           const rawUrl = mat.external_url || mat.file_url || null;
           const resolvedUrl = !isModuleLocked && rawUrl ? await resolveMaterialAccessUrl(rawUrl) : null;
@@ -3534,7 +3527,7 @@ export async function getTraineeLearningMaterials(
       } else {
         const desc = m.description || 'Maritime training lecture and STCW syllabus review.';
         const isPassed = modQuiz ? Boolean(modQuiz.isPassed) : true;
-        const isRead = completedSet.has(`les-${m.id}`) || isPassed;
+        const isRead = completedSet.has(`les-${m.id}`) || completedSet.has(m.id) || isPassed;
         const isCompleted = dailyStatus === 'COMPLETED' || (isRead && isPassed);
 
         lessons.push({
@@ -3713,21 +3706,24 @@ export async function recordTraineeLessonCompletion(
   if (!targetLesson) {
     throw new Error('Lesson not found in trainee curriculum.');
   }
-  if (targetLesson.isLocked || targetLesson.isFailed) {
-    const err = new Error(targetLesson.lockReason || targetLesson.failureReason || 'ASSESSMENT_LOCKED: Lesson module is locked.');
+  if (targetLesson.isLocked) {
+    const err = new Error(targetLesson.lockReason || 'ASSESSMENT_LOCKED: Lesson module is locked.');
     (err as any).code = 'ASSESSMENT_LOCKED';
     throw err;
   }
+
+  const resolvedCourseId = targetLesson.courseId || courseId;
+  const resolvedModuleId = targetLesson.moduleId || moduleName || null;
 
   // 1. Upsert completion record
   const { error } = await supabaseAdmin
     .from('trainee_lesson_completions')
     .upsert({
       trainee_id: resolvedId,
-      course_id: courseId,
+      course_id: resolvedCourseId,
       lesson_id: lessonId,
-      module_id: moduleName || null,
-      lesson_title: lessonTitle || null,
+      module_id: resolvedModuleId,
+      lesson_title: lessonTitle || targetLesson.title || null,
       completed_at: new Date().toISOString(),
     }, { onConflict: 'trainee_id,course_id,lesson_id' });
 
@@ -3738,7 +3734,7 @@ export async function recordTraineeLessonCompletion(
   // 2. Recalculate progress for this course
   // - In-House Courses (Full Modular-Based): 100% Modular Lessons (+ Post-Test if present).
   // - Safety and Other STCW Courses: Theory modules represent 50%, Post-Test 10%, Practical 40%/50%.
-  const lessons = await getTraineeLearningMaterials(courseId, resolvedId);
+  const lessons = await getTraineeLearningMaterials(resolvedCourseId, resolvedId);
   const total = lessons.length || 4;
   const completed = lessons.filter((l: any) => l.isCompleted || l.id === lessonId).length;
   const requiresPractical = (lessons as any).requiresPractical !== false;
@@ -3775,11 +3771,11 @@ export async function recordTraineeLessonCompletion(
       updated_at: new Date().toISOString(),
     })
     .eq('trainee_id', resolvedId)
-    .eq('course_id', courseId);
+    .eq('course_id', resolvedCourseId);
 
   if (!requiresPractical && progressPercent === 100) {
     try {
-      await calculateTraineeCourseGrade({ traineeId: resolvedId, courseId });
+      await calculateTraineeCourseGrade({ traineeId: resolvedId, courseId: resolvedCourseId });
     } catch (gradeErr) {
       console.warn('Could not sync full modular course grade on lesson completion:', gradeErr);
     }
@@ -3787,7 +3783,7 @@ export async function recordTraineeLessonCompletion(
 
   return {
     lessonId,
-    courseId,
+    courseId: resolvedCourseId,
     isCompleted: true,
     progressPercent,
     completedLessons: completed,
@@ -3877,6 +3873,11 @@ export async function getTraineeAssessmentsList(traineeId: string, search?: stri
   const { data, error } = await query;
   if (error) throw error;
 
+  // Sync daily module tracking for each enrolled course so status is always fresh
+  await Promise.all(
+    courseIds.map((cid: string) => syncTraineeDailyModules(resolvedId, cid).catch(() => []))
+  );
+
   // Fetch attempts, read-module state, course modules, and daily module tracking for locking verification
   const [attemptsRes, readModuleIds, modulesRes, trackingRes] = await Promise.all([
     supabaseAdmin
@@ -3896,7 +3897,10 @@ export async function getTraineeAssessmentsList(traineeId: string, search?: stri
       .in('course_id', courseIds),
   ]);
 
-  const attempts = attemptsRes.data || [];
+  const attempts = (attemptsRes.data || []).filter(
+    (att: any) =>
+      !(Number(att.score) === 0 && att.status === 'FAILED' && String(att.submitted_at || '').includes('59:59'))
+  );
   const allModules = modulesRes.data || [];
   const trackRows = trackingRes.data || [];
   const trackMap = new Map<string, any>();
@@ -4082,14 +4086,18 @@ export async function submitTraineeAssessment(
     throw err;
   }
 
-  // 1 Attempt Only Enforcement: Check if an attempt already exists
-  const { data: existingAttempts } = await supabaseAdmin
+  // 1 Attempt Only Enforcement: Check if a real attempt already exists (ignore synthetic deadline rows)
+  const { data: rawExistingAttempts } = await supabaseAdmin
     .from('assessment_attempts')
     .select('id, score, status, passed, submitted_at')
     .eq('assessment_id', assessmentId)
     .eq('trainee_id', resolvedId)
-    .order('submitted_at', { ascending: false })
-    .limit(1);
+    .order('submitted_at', { ascending: false });
+
+  const existingAttempts = (rawExistingAttempts || []).filter(
+    (att: any) =>
+      !(Number(att.score) === 0 && att.status === 'FAILED' && String(att.submitted_at || '').includes('59:59'))
+  );
 
   if (existingAttempts && existingAttempts.length > 0) {
     const prev = existingAttempts[0];
