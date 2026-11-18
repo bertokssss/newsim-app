@@ -26,10 +26,20 @@ export async function POST(req: NextRequest) {
 
     const res = NextResponse.json({ success: true, message: 'Logged out successfully.' });
     clearSessionCookies(res, 'TRAINEE');
+    for (const c of req.cookies.getAll()) {
+      if (c.name.startsWith('sb-')) {
+        res.cookies.delete(c.name);
+      }
+    }
     return res;
   } catch (error: any) {
     const res = NextResponse.json({ success: true, message: 'Session terminated.' });
     clearSessionCookies(res, 'TRAINEE');
+    for (const c of req.cookies.getAll()) {
+      if (c.name.startsWith('sb-')) {
+        res.cookies.delete(c.name);
+      }
+    }
     return res;
   }
 }

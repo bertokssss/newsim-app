@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { supabaseAdmin } from '@newsim/database';
 import {
   verifyRecaptchaToken,
   GOOGLE_RECAPTCHA_V2_FALLBACK_SITE_KEY,
@@ -136,13 +137,35 @@ export async function POST(req: NextRequest) {
     });
 
     if (action === 'google_register') {
-      response.cookies.set(OAUTH_CAPTCHA_COOKIE, createOauthCaptchaPass(), {
+      const passToken = createOauthCaptchaPass();
+      response.cookies.set(OAUTH_CAPTCHA_COOKIE, passToken, {
         httpOnly: true,
         sameSite: 'lax',
         secure: req.nextUrl.protocol === 'https:',
         path: '/',
         maxAge: OAUTH_CAPTCHA_TTL_SECONDS,
       });
+
+      // Also persist a short-lived server-side pass in audit_logs so if the user initiates OAuth
+      // on a Vercel preview deployment URL and Supabase redirects back to the production Site URL,
+      // /auth/callback can still verify and consume the single-use reCAPTCHA pass.
+      try {
+        await supabaseAdmin.from('audit_logs').insert({
+          actor_id: null,
+          action: 'GOOGLE_REGISTER_RECAPTCHA_PASSED',
+          entity_type: 'OAUTH_CAPTCHA',
+          entity_id: null,
+          new_values: {
+            pass: passToken,
+            origin: req.nextUrl.origin,
+            expiresAt: Date.now() + OAUTH_CAPTCHA_TTL_SECONDS * 1000,
+          },
+          ip_address: ip,
+          user_agent: req.headers.get('user-agent') || 'Browser',
+        });
+      } catch (err) {
+        console.warn('reCAPTCHA verify: server pass log notice:', err);
+      }
     }
 
     return response;

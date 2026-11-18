@@ -104,11 +104,39 @@ export async function GET(request: NextRequest) {
       await supabase.auth.exchangeCodeForSession(code, flowId ? { flowId } : undefined);
 
     if (exchangeError) {
-      // Check whether a concurrent callback request already exchanged the single-use code into a valid session.
-      const { data: existingUserData } = await supabase.auth.getUser().catch(() => ({ data: { user: null } }));
-      if (existingUserData?.user) {
-        authUser = existingUserData.user;
-      } else {
+      // Fallback 1: If the PKCE code_verifier cookie was lost across a preview-domain -> Site URL redirect
+      // or partitioned by the browser during the OAuth redirect chain, atomically verify and consume
+      // the single-use `auth_code` directly from Supabase `auth.flow_state` via service_role RPC.
+      try {
+        const { data: consumedFlows, error: rpcErr } = await supabaseAdmin.rpc(
+          'consume_oauth_flow_code',
+          { p_auth_code: code }
+        );
+        const matchedFlow = Array.isArray(consumedFlows) ? consumedFlows[0] : null;
+        if (!rpcErr && matchedFlow?.user_id) {
+          const { data: adminUserData } = await supabaseAdmin.auth.admin.getUserById(
+            matchedFlow.user_id
+          );
+          if (adminUserData?.user) {
+            authUser = adminUserData.user;
+          }
+        }
+      } catch (fallbackErr) {
+        console.warn('OAuth callback: flow_state fallback check notice:', fallbackErr);
+      }
+
+      // Fallback 2: Check whether a concurrent callback request already exchanged the single-use code
+      // into a valid session (only when the error is NOT a missing PKCE verifier).
+      if (!authUser && !exchangeError.message.toLowerCase().includes('code verifier')) {
+        const { data: existingUserData } = await supabase.auth
+          .getUser()
+          .catch(() => ({ data: { user: null } }));
+        if (existingUserData?.user) {
+          authUser = existingUserData.user;
+        }
+      }
+
+      if (!authUser) {
         console.error('OAuth callback: code exchange failed:', exchangeError.message);
         const isPkceMissing = exchangeError.message.toLowerCase().includes('code verifier');
         logAuditEvent({
@@ -244,17 +272,44 @@ export async function GET(request: NextRequest) {
   // A NEW account is only provisioned when the browser carries a valid, server-issued
   // reCAPTCHA pass (set by POST /api/auth/recaptcha/verify right before OAuth started).
   if (isNewRegistration && !profile) {
-    const captchaPassValid = verifyOauthCaptchaPass(request.cookies.get(OAUTH_CAPTCHA_COOKIE)?.value);
+    let effectiveFlow = flow;
+    let captchaPassValid = verifyOauthCaptchaPass(request.cookies.get(OAUTH_CAPTCHA_COOKIE)?.value);
 
-    if (flow !== 'register' || !captchaPassValid) {
-      // Remove the just-created, unprovisioned Supabase auth user so no orphan account remains.
-      const createdAtMs = authUser.created_at ? new Date(authUser.created_at).getTime() : 0;
-      if (createdAtMs && Date.now() - createdAtMs < 15 * 60 * 1000) {
-        try {
-          await supabaseAdmin.auth.admin.deleteUser(authUser.id);
-        } catch (cleanupErr) {
-          console.warn('OAuth callback: orphan auth user cleanup notice:', cleanupErr);
+    // If cookies were set on a Vercel preview domain before Supabase redirected to the production
+    // Site URL, check for a single-use server-side reCAPTCHA pass recorded within the last 10 minutes.
+    if (!captchaPassValid) {
+      try {
+        const tenMinAgoIso = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+        const { data: recentPasses } = await supabaseAdmin
+          .from('audit_logs')
+          .select('id, ip_address, new_values, created_at')
+          .eq('action', 'GOOGLE_REGISTER_RECAPTCHA_PASSED')
+          .gte('created_at', tenMinAgoIso)
+          .order('created_at', { ascending: false })
+          .limit(5);
+
+        const matchingRow = (recentPasses || []).find((row: any) => {
+          const passVal = row?.new_values?.pass;
+          if (!verifyOauthCaptchaPass(passVal)) return false;
+          return row.ip_address === ip || Date.now() - new Date(row.created_at).getTime() < 3 * 60 * 1000;
+        });
+
+        if (matchingRow) {
+          captchaPassValid = true;
+          effectiveFlow = 'register';
+          await supabaseAdmin.from('audit_logs').delete().eq('id', matchingRow.id);
         }
+      } catch (passCheckErr) {
+        console.warn('OAuth callback: server pass lookup notice:', passCheckErr);
+      }
+    }
+
+    if (effectiveFlow !== 'register' || !captchaPassValid) {
+      // Remove the unprovisioned Supabase auth user so no orphan account remains.
+      try {
+        await supabaseAdmin.auth.admin.deleteUser(authUser.id);
+      } catch (cleanupErr) {
+        console.warn('OAuth callback: orphan auth user cleanup notice:', cleanupErr);
       }
 
       logAuditEvent({
@@ -262,14 +317,14 @@ export async function GET(request: NextRequest) {
         actorRole: 'ANONYMOUS',
         action: 'GOOGLE_REGISTRATION_RECAPTCHA_REJECTED',
         targetType: 'USER',
-        details: { provider, flow, reason: flow !== 'register' ? 'not_registered' : 'recaptcha_missing_or_expired' },
+        details: { provider, flow: effectiveFlow, reason: effectiveFlow !== 'register' ? 'not_registered' : 'recaptcha_missing_or_expired' },
         ipAddress: ip,
         userAgent,
         status: 'FAILED',
         severity: 'WARNING',
       });
 
-      const errorCode = flow !== 'register' ? 'google_account_not_registered' : 'recaptcha_required';
+      const errorCode = effectiveFlow !== 'register' ? 'google_account_not_registered' : 'recaptcha_required';
       const rejectResponse = NextResponse.redirect(`${origin}/register?error=${errorCode}`);
       rejectResponse.cookies.delete('newsim_oauth_flow');
       rejectResponse.cookies.delete('newsim_oauth_terms');
