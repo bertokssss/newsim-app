@@ -64,9 +64,12 @@ export async function GET(req: NextRequest) {
 
   const startIndex = (page - 1) * limit;
 
-  const { data, count, error } = await query
-    .order('created_at', { ascending: false })
-    .range(startIndex, startIndex + limit - 1);
+  const [{ data, count, error }, { data: pendingInvites }] = await Promise.all([
+    query
+      .order('created_at', { ascending: false })
+      .range(startIndex, startIndex + limit - 1),
+    supabaseAdmin.from('invitations').select('email').eq('status', 'PENDING'),
+  ]);
 
   if (error) {
     console.error('Error fetching instructors:', error);
@@ -80,10 +83,18 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  const pendingEmailSet = new Set(
+    (pendingInvites || []).map((inv: { email?: string }) => (inv.email || '').toLowerCase().trim())
+  );
+
   const formattedData = (data || []).map((profile: any) => {
     const instructor = Array.isArray(profile.instructors)
       ? profile.instructors[0]
       : profile.instructors;
+
+    const isPending =
+      profile.status?.toUpperCase() === 'PENDING' ||
+      pendingEmailSet.has((profile.email || '').toLowerCase().trim());
 
     return {
       id: profile.id,
@@ -92,7 +103,7 @@ export async function GET(req: NextRequest) {
       lastName: profile.last_name,
       phone: profile.phone,
       avatarUrl: profile.avatar_url || null,
-      status: profile.status?.toUpperCase(),
+      status: isPending ? 'PENDING' : profile.status?.toUpperCase() || 'ACTIVE',
 
       // Keep this only if mfa_enabled exists in your profiles table.
       mfaEnabled: !!profile.mfa_enabled,
@@ -284,8 +295,8 @@ export async function POST(req: NextRequest) {
         email: cleanEmail,
         password: password,
 
-        // Auto-confirm to avoid pending lockout
-        email_confirm: true,
+        // Keep pending until email is confirmed
+        email_confirm: false,
 
         user_metadata: {
           first_name: firstName.trim(),

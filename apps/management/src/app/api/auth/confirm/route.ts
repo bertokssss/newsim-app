@@ -88,6 +88,15 @@ export async function GET(req: NextRequest) {
       return NextResponse.redirect(`${targetUrl}/login?error=activation_failed`);
     }
 
+    // Confirm email in auth.users
+    try {
+      await supabaseAdmin.auth.admin.updateUserById(updatedProfile.id, {
+        email_confirm: true,
+      });
+    } catch (authConfirmErr) {
+      console.warn('Notice: Failed to set email_confirm on auth user:', authConfirmErr);
+    }
+
     return NextResponse.redirect(`${targetUrl}/login?message=account_confirmed`);
   } catch (error) {
     console.error('Confirmation error:', error);

@@ -24,10 +24,23 @@ export async function GET(request: NextRequest) {
       .select('*, profiles(first_name, last_name, email, phone, status, avatar_url), training_centers(name)');
     query = applyCenterFilter(query, ctx.centerId);
 
-    const { data, error } = await query.order('created_at', { ascending: false }).limit(limit);
+    const [{ data, error }, { data: pendingInvites }] = await Promise.all([
+      query.order('created_at', { ascending: false }).limit(limit),
+      supabaseAdmin.from('invitations').select('email').eq('status', 'PENDING'),
+    ]);
     if (error) throw error;
 
-    let trainees = (data || []).map(formatTrainee);
+    const pendingEmails = new Set(
+      (pendingInvites || []).map((inv: { email?: string }) => (inv.email || '').toLowerCase().trim())
+    );
+
+    let trainees = (data || []).map((row: any) => {
+      const formatted = formatTrainee(row);
+      if (formatted.email && pendingEmails.has(formatted.email.toLowerCase().trim())) {
+        formatted.status = 'PENDING';
+      }
+      return formatted;
+    });
 
     if (search) {
       trainees = trainees.filter((t: any) =>

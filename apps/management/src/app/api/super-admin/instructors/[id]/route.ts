@@ -10,7 +10,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   }
 
   const { id } = await params;
-  const { data: profile, error } = await supabaseAdmin.from('profiles').select('*, instructors!inner(*)').eq('id', id).single();
+  const [{ data: profile, error }, { data: pendingInvite }] = await Promise.all([
+    supabaseAdmin.from('profiles').select('*, instructors!inner(*)').eq('id', id).single(),
+    supabaseAdmin.from('invitations').select('id').eq('status', 'PENDING').limit(1).maybeSingle(),
+  ]);
 
   if (error || !profile || (profile.role !== 'instructor' && profile.role !== 'INSTRUCTOR')) {
     return NextResponse.json(
@@ -18,6 +21,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       { status: 404 }
     );
   }
+
+  const { data: specificInvite } = await supabaseAdmin
+    .from('invitations')
+    .select('id')
+    .eq('email', profile.email)
+    .eq('status', 'PENDING')
+    .maybeSingle();
+
+  const isPending = profile.status?.toUpperCase() === 'PENDING' || !!specificInvite;
 
   return NextResponse.json({
     success: true,
@@ -28,7 +40,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       lastName: profile.last_name,
       phone: profile.phone,
       avatarUrl: profile.avatar_url || null,
-      status: profile.status.toUpperCase(),
+      status: isPending ? 'PENDING' : profile.status.toUpperCase(),
       mfaEnabled: !!profile.mfa_enabled,
       createdAt: profile.created_at,
       
@@ -88,7 +100,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
       return NextResponse.json({ success: true, message: 'Instructor account permanently deleted.' });
     } else if (action === 'RESEND_INVITATION') {
-      if (profile.status !== 'pending' && profile.status !== 'PENDING') {
+      const { data: pendingInvite } = await supabaseAdmin
+        .from('invitations')
+        .select('id')
+        .eq('email', profile.email)
+        .eq('status', 'PENDING')
+        .maybeSingle();
+
+      if (profile.status?.toUpperCase() !== 'PENDING' && !pendingInvite) {
         return NextResponse.json(
           { success: false, error: 'Can only resend invitation for pending accounts.' },
           { status: 400 }

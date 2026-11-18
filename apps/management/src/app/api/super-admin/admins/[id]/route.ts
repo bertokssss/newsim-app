@@ -19,7 +19,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   }
 
   const { id } = await params;
-  const { data: admin, error } = await supabaseAdmin.from('profiles').select('*, admins(position, permissions)').eq('id', id).single();
+  const [{ data: admin, error }, { data: pendingInvite }] = await Promise.all([
+    supabaseAdmin.from('profiles').select('*, admins(position, permissions)').eq('id', id).single(),
+    supabaseAdmin.from('invitations').select('id').eq('status', 'PENDING').limit(1).maybeSingle(),
+  ]);
 
   if (error || !admin || (admin.role !== 'admin' && admin.role !== 'ADMIN')) {
     return NextResponse.json(
@@ -27,6 +30,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       { status: 404 }
     );
   }
+
+  const { data: specificInvite } = await supabaseAdmin
+    .from('invitations')
+    .select('id')
+    .eq('email', admin.email)
+    .eq('status', 'PENDING')
+    .maybeSingle();
+
+  const isPending = admin.status?.toUpperCase() === 'PENDING' || !!specificInvite;
 
   const adm = Array.isArray((admin as any).admins) ? (admin as any).admins[0] : (admin as any).admins;
 
@@ -40,7 +52,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       lastName: admin.last_name,
       position: adm?.position || admin.position || null,
       permissions: Array.isArray(adm?.permissions) ? adm.permissions : [],
-      status: admin.status.toUpperCase(),
+      status: isPending ? 'PENDING' : admin.status.toUpperCase(),
       phone: admin.phone,
       avatarUrl: admin.avatar_url || null,
       mfaEnabled: !!admin.mfa_enabled,
@@ -107,8 +119,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
       return NextResponse.json({ success: true, message: 'Administrator account permanently deleted.' });
     } else if (action === 'RESEND_INVITATION') {
-      // Only for pending admins
-      if (admin.status !== 'pending' && admin.status !== 'PENDING') {
+      const { data: pendingInvite } = await supabaseAdmin
+        .from('invitations')
+        .select('id')
+        .eq('email', admin.email)
+        .eq('status', 'PENDING')
+        .maybeSingle();
+
+      if (admin.status?.toUpperCase() !== 'PENDING' && !pendingInvite) {
         return NextResponse.json(
           { success: false, error: 'Can only resend invitation for pending accounts.' },
           { status: 400 }

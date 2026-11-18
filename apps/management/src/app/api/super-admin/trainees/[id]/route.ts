@@ -6,6 +6,7 @@ import {
   createUnauthorizedResponse,
   createForbiddenResponse,
   reactivateAccount,
+  resolveSafeAppOrigin,
   resolveSiblingPortalOrigin,
 } from '@newsim/auth';
 import {
@@ -45,7 +46,7 @@ export async function GET(
       return NextResponse.json({ success: false, error: 'Trainee not found' }, { status: 404 });
     }
 
-    const [{ data: enrollments }, { data: attendance }, { data: certificates }] =
+    const [{ data: enrollments }, { data: attendance }, { data: certificates }, { data: pendingInvite }] =
       await Promise.all([
         supabaseAdmin
           .from('enrollments')
@@ -59,12 +60,23 @@ export async function GET(
           .from('certificates')
           .select('*, trainees(profiles(first_name, last_name, email, avatar_url)), courses(code, name)')
           .eq('trainee_id', id),
+        supabaseAdmin
+          .from('invitations')
+          .select('id')
+          .eq('email', trainee.profiles?.email)
+          .eq('status', 'PENDING')
+          .maybeSingle(),
       ]);
+
+    const formattedTrainee = formatTrainee(trainee);
+    if (pendingInvite) {
+      formattedTrainee.status = 'PENDING';
+    }
 
     return NextResponse.json({
       success: true,
       data: {
-        ...formatTrainee(trainee),
+        ...formattedTrainee,
         enrollments: (enrollments || []).map((row: any) => {
           const formatted = formatEnrollment(row);
           const { paymentAmount, paymentStatus, rawPaymentStatus, paymongoCheckoutId, paymongoPaymentId, paymentMethod, ...nonFinancial } = formatted as any;
@@ -107,7 +119,14 @@ export async function PATCH(
         return NextResponse.json({ success: false, error: 'Trainee profile not found.' }, { status: 404 });
       }
 
-      if (traineeProfile.status?.toUpperCase() !== 'PENDING') {
+      const { data: pendingInvite } = await supabaseAdmin
+        .from('invitations')
+        .select('id')
+        .eq('email', traineeProfile.email)
+        .eq('status', 'PENDING')
+        .maybeSingle();
+
+      if (traineeProfile.status?.toUpperCase() !== 'PENDING' && !pendingInvite) {
         return NextResponse.json({ success: false, error: 'Can only resend invitation for pending accounts.' }, { status: 400 });
       }
 
@@ -131,7 +150,7 @@ export async function PATCH(
         );
       }
 
-      const baseUrl = resolveSiblingPortalOrigin(request, 'trainee');
+      const baseUrl = resolveSafeAppOrigin(request, 'http://localhost:3000');
       const confirmUrl = `${baseUrl}/api/auth/confirm?token=${token}`;
 
       const { sendInvitationEmail } = await import('@newsim/auth');

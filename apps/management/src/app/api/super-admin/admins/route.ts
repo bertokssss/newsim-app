@@ -39,15 +39,25 @@ export async function GET(req: NextRequest) {
   }
 
   const startIndex = (page - 1) * limit;
-  const { data: admins, count, error } = await query.range(startIndex, startIndex + limit - 1).order('created_at', { ascending: false });
+  const [{ data: admins, count, error }, { data: pendingInvites }] = await Promise.all([
+    query.range(startIndex, startIndex + limit - 1).order('created_at', { ascending: false }),
+    supabaseAdmin.from('invitations').select('email').eq('status', 'PENDING'),
+  ]);
 
   if (error) {
     console.error("Failed to fetch admins:", error);
     return NextResponse.json({ success: false, error: 'Database error' }, { status: 500 });
   }
 
+  const pendingEmailSet = new Set(
+    (pendingInvites || []).map((inv: { email?: string }) => (inv.email || '').toLowerCase().trim())
+  );
+
   const paginated = (admins || []).map((u: any) => {
     const adm = Array.isArray(u.admins) ? u.admins[0] : u.admins;
+    const isPending =
+      u.status?.toUpperCase() === 'PENDING' ||
+      pendingEmailSet.has((u.email || '').toLowerCase().trim());
     return {
       id: u.id,
       email: u.email,
@@ -56,7 +66,7 @@ export async function GET(req: NextRequest) {
       lastName: u.last_name,
       position: adm?.position || u.position || null,
       permissions: Array.isArray(adm?.permissions) ? adm.permissions : [],
-      status: (u.status || 'pending').toUpperCase(),
+      status: isPending ? 'PENDING' : (u.status || 'ACTIVE').toUpperCase(),
       phone: u.phone,
       avatarUrl: u.avatar_url || null,
       createdAt: u.created_at,
@@ -149,7 +159,7 @@ export async function POST(req: NextRequest) {
     const { data: authData, error: createError } = await supabaseAdmin.auth.admin.createUser({
       email: cleanEmail,
       password: password,
-      email_confirm: true, // auto-confirm to avoid pending lockout
+      email_confirm: false, // keep pending until email is confirmed
       user_metadata: {
         first_name: firstName.trim(),
         last_name: lastName.trim(),

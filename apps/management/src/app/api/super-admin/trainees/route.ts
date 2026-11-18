@@ -145,6 +145,15 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    const { data: pendingInvitations } = await supabaseAdmin
+      .from('invitations')
+      .select('email')
+      .eq('status', 'PENDING');
+
+    const pendingEmailSet = new Set(
+      (pendingInvitations || []).map((inv: { email?: string }) => (inv.email || '').toLowerCase().trim())
+    );
+
     /*
      * Convert database records into the format
      * expected by the frontend.
@@ -152,12 +161,17 @@ export async function GET(request: NextRequest) {
      * Explicitly typing this array fixes TS7006
      * errors caused by implicit `any`.
      */
-   const traineeRows = (data || []) as Array<Record<string, unknown>>;
+    const traineeRows = (data || []) as Array<Record<string, unknown>>;
 
-let trainees: FormattedTrainee[] = traineeRows.map(
-  (row: Record<string, unknown>) =>
-    formatTrainee(row) as FormattedTrainee
-);
+    let trainees: FormattedTrainee[] = traineeRows.map(
+      (row: Record<string, unknown>) => {
+        const formatted = formatTrainee(row) as FormattedTrainee;
+        if (formatted.email && pendingEmailSet.has(formatted.email.toLowerCase().trim())) {
+          formatted.status = 'PENDING';
+        }
+        return formatted;
+      }
+    );
 
     /*
      * SEARCH
@@ -465,7 +479,7 @@ export async function POST(request: NextRequest) {
       await supabaseAdmin.auth.admin.createUser({
         email: cleanEmail,
         password: password,
-        email_confirm: true,
+        email_confirm: false,
         user_metadata: {
           first_name: cleanFirstName,
           last_name: cleanLastName,
@@ -507,7 +521,7 @@ export async function POST(request: NextRequest) {
           username: cleanSrn,
           srn: cleanSrn,
           role: 'TRAINEE',
-          status: 'ACTIVE',
+          status: 'PENDING',
           first_name: cleanFirstName,
           last_name: cleanLastName,
           phone:
@@ -541,7 +555,7 @@ export async function POST(request: NextRequest) {
       trainee_number: cleanSrn,
       training_center_id:
         assignedCenterId,
-      enrollment_status: 'ACTIVE',
+      enrollment_status: 'PENDING',
     };
 
     /*
@@ -624,8 +638,8 @@ export async function POST(request: NextRequest) {
       console.warn('[SUPER_ADMIN TRAINEES POST] Invitation table notice:', invErr);
     }
 
-    const traineeOrigin = resolveSiblingPortalOrigin(request, 'trainee');
-    const confirmUrl = `${traineeOrigin}/api/auth/confirm?token=${token}`;
+    const baseUrl = resolveSafeAppOrigin(request, 'http://localhost:3000');
+    const confirmUrl = `${baseUrl}/api/auth/confirm?token=${token}`;
 
     try {
       const { sendInvitationEmail } = await import('@newsim/auth');
