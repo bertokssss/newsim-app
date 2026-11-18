@@ -145,32 +145,10 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const { data: pendingInvitations } = await supabaseAdmin
-      .from('invitations')
-      .select('email')
-      .eq('status', 'PENDING');
-
-    const pendingEmailSet = new Set(
-      (pendingInvitations || []).map((inv: { email?: string }) => (inv.email || '').toLowerCase().trim())
-    );
-
-    /*
-     * Convert database records into the format
-     * expected by the frontend.
-     *
-     * Explicitly typing this array fixes TS7006
-     * errors caused by implicit `any`.
-     */
     const traineeRows = (data || []) as Array<Record<string, unknown>>;
 
     let trainees: FormattedTrainee[] = traineeRows.map(
-      (row: Record<string, unknown>) => {
-        const formatted = formatTrainee(row) as FormattedTrainee;
-        if (formatted.email && pendingEmailSet.has(formatted.email.toLowerCase().trim())) {
-          formatted.status = 'PENDING';
-        }
-        return formatted;
-      }
+      (row: Record<string, unknown>) => formatTrainee(row) as FormattedTrainee
     );
 
     /*

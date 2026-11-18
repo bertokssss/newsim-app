@@ -442,6 +442,10 @@ export default function TraineesClient() {
                         <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 text-[11px] font-mono font-medium">
                           <CheckCircle2 className="w-3.5 h-3.5" /> Verified
                         </span>
+                      ) : trainee.status === 'SUSPENDED' ? (
+                        <span className="inline-flex items-center gap-1 text-rose-600 dark:text-rose-400 text-[11px] font-mono">
+                          <Ban className="w-3.5 h-3.5" /> Suspended
+                        </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400 text-[11px] font-mono">
                           <Clock className="w-3.5 h-3.5" /> Awaiting
@@ -704,7 +708,7 @@ export default function TraineesClient() {
                     <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200/60 dark:border-slate-800 space-y-3">
                       <span className="text-[10px] font-mono uppercase text-slate-400 font-bold">Operational Status Controls</span>
                       <div className="flex items-center gap-2">
-                        {['ACTIVE', 'PENDING', 'SUSPENDED', 'COMPLETED'].map((st) => (
+                        {['ACTIVE', 'PENDING', 'SUSPENDED'].map((st) => (
                           <button
                             key={st}
                             onClick={() => handleStatusChange(selectedTrainee.id, st)}

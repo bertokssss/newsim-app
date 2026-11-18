@@ -492,6 +492,15 @@ export async function POST(req: NextRequest) {
           );
         }
 
+        // Clear any leftover PENDING invitation for this self-registered email so it stays ACTIVE in Super Admin
+        try {
+          await supabaseAdmin
+            .from('invitations')
+            .update({ status: 'ACCEPTED', accepted_at: new Date().toISOString() })
+            .ilike('email', escapeIlikePattern(normalizedEmail))
+            .eq('status', 'PENDING');
+        } catch {}
+
         await recordTermsAcceptance({
           userId,
           termsVersion: decoded.termsVersion || TERMS_VERSION,
@@ -850,6 +859,16 @@ export async function POST(req: NextRequest) {
             { status: 500 }
           );
         }
+      }
+
+      if (authEmail) {
+        try {
+          await supabaseAdmin
+            .from('invitations')
+            .update({ status: 'ACCEPTED', accepted_at: new Date().toISOString() })
+            .ilike('email', escapeIlikePattern(authEmail))
+            .eq('status', 'PENDING');
+        } catch {}
       }
 
       if (decoded.termsAgreed) {

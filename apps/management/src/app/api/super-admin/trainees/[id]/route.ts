@@ -53,7 +53,6 @@ export async function GET(
       { data: grades },
       { data: attempts },
       { data: practicalEvals },
-      { data: pendingInvite },
     ] = await Promise.all([
       supabaseAdmin
         .from('enrollments')
@@ -84,18 +83,9 @@ export async function GET(
         .select('id, course_id, total_score, max_possible_score, percentage, competency_status, status, general_feedback, evaluation_date, courses(code, name)')
         .eq('trainee_id', id)
         .order('created_at', { ascending: false }),
-      supabaseAdmin
-        .from('invitations')
-        .select('id')
-        .eq('email', trainee.profiles?.email)
-        .eq('status', 'PENDING')
-        .maybeSingle(),
     ]);
 
     const formattedTrainee = formatTrainee(trainee);
-    if (pendingInvite) {
-      formattedTrainee.status = 'PENDING';
-    }
 
     const nowMs = Date.now();
     const nearExpWindowMs = 90 * 24 * 60 * 60 * 1000;
@@ -220,14 +210,7 @@ export async function PATCH(
         return NextResponse.json({ success: false, error: 'Trainee profile not found.' }, { status: 404 });
       }
 
-      const { data: pendingInvite } = await supabaseAdmin
-        .from('invitations')
-        .select('id')
-        .eq('email', traineeProfile.email)
-        .eq('status', 'PENDING')
-        .maybeSingle();
-
-      if (traineeProfile.status?.toUpperCase() !== 'PENDING' && !pendingInvite) {
+      if (traineeProfile.status?.toUpperCase() !== 'PENDING') {
         return NextResponse.json({ success: false, error: 'Can only resend invitation for pending accounts.' }, { status: 400 });
       }
 
@@ -286,7 +269,13 @@ export async function PATCH(
     if (body.firstName !== undefined) profileUpdates.first_name = body.firstName;
     if (body.lastName !== undefined) profileUpdates.last_name = body.lastName;
     if (body.phone !== undefined) profileUpdates.phone = body.phone;
-    if (body.status !== undefined) profileUpdates.status = body.status;
+    if (body.status !== undefined) {
+      const nextStatus = String(body.status).trim().toUpperCase();
+      if (!['ACTIVE', 'PENDING', 'SUSPENDED', 'INACTIVE'].includes(nextStatus)) {
+        return NextResponse.json({ success: false, error: 'Invalid account status.' }, { status: 400 });
+      }
+      profileUpdates.status = nextStatus;
+    }
     if (body.address !== undefined) traineeUpdates.address = body.address;
     if (body.srn !== undefined) {
       const cleanSrn = String(body.srn).trim();
@@ -307,10 +296,20 @@ export async function PATCH(
         }
       } else if (profileUpdates.status === 'ACTIVE') {
         try {
-          await supabaseAdmin.auth.admin.updateUserById(id, { ban_duration: 'none' });
+          await supabaseAdmin.auth.admin.updateUserById(id, { ban_duration: 'none', email_confirm: true });
         } catch (e) {
           console.warn('Could not reset ban duration in auth.users:', e);
         }
+        try {
+          const { data: profEmail } = await supabaseAdmin.from('profiles').select('email').eq('id', id).maybeSingle();
+          if (profEmail?.email) {
+            await supabaseAdmin
+              .from('invitations')
+              .update({ status: 'ACCEPTED', accepted_at: new Date().toISOString() })
+              .ilike('email', profEmail.email.trim())
+              .eq('status', 'PENDING');
+          }
+        } catch {}
       }
     }
 
@@ -362,12 +361,21 @@ export async function DELETE(
     const { id } = await params;
     const { ip, userAgent } = requestMeta(request);
 
+    const { data: targetProfile } = await supabaseAdmin
+      .from('profiles')
+      .select('email')
+      .eq('id', id)
+      .maybeSingle();
+
     // Clean up dependent trainee records to avoid FK constraint blocks
     await supabaseAdmin.from('attendance').delete().eq('trainee_id', id);
     await supabaseAdmin.from('certificates').delete().eq('trainee_id', id);
     await supabaseAdmin.from('payments').delete().eq('trainee_id', id);
     await supabaseAdmin.from('enrollments').delete().eq('trainee_id', id);
     await supabaseAdmin.from('trainees').delete().eq('profile_id', id);
+    if (targetProfile?.email) {
+      await supabaseAdmin.from('invitations').delete().ilike('email', targetProfile.email.trim());
+    }
     const { error } = await supabaseAdmin.from('profiles').delete().eq('id', id);
 
     if (error) throw error;

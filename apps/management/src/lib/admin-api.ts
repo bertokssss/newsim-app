@@ -357,7 +357,7 @@ export function formatTrainee(row: any) {
     srn: row.srn || '',
     rank: row.gender || 'Seafarer',
     vesselType: row.nationality || '',
-    status: (profile.status || row.enrollment_status || 'PENDING').toString().toUpperCase(),
+    status: (profile.status || 'ACTIVE').toString().toUpperCase(),
     centerId: row.training_center_id || '',
     centerName: center?.name || '',
     enrollmentsCount: row.enrollmentsCount ?? 0,

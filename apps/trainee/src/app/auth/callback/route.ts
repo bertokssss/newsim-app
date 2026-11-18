@@ -422,6 +422,17 @@ export async function GET(request: NextRequest) {
       userAgent,
       severity: 'INFO',
     });
+
+    // Clear any stale PENDING invitation for this Google-registered email so Super Admin never marks it PENDING
+    if (authEmail) {
+      try {
+        await supabaseAdmin
+          .from('invitations')
+          .update({ status: 'ACCEPTED', accepted_at: new Date().toISOString() })
+          .ilike('email', escapeIlikePattern(authEmail))
+          .eq('status', 'PENDING');
+      } catch {}
+    }
   }
 
   // 5. Profile must exist at this point (existing trainee login)
