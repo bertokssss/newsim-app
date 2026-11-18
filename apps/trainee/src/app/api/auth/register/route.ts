@@ -161,7 +161,7 @@ export async function POST(req: NextRequest) {
     // ACTION 1: SEND_OTP (Manual Registration Step 1)
     // ==========================================
     if (action === 'SEND_OTP') {
-      const { firstName, lastName, email, mobile, password, srn, recaptchaToken, agreedToTerms } = body;
+      const { firstName, lastName, email, mobile, password, srn, agreedToTerms } = body;
 
       const cleanFirstName = sanitizeText(firstName, 80);
       const cleanLastName = sanitizeText(lastName, 80);
@@ -214,21 +214,9 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // 2. Verify reCAPTCHA token if provided (manual registration is verified via email OTP)
-      if (recaptchaToken) {
-        const recaptchaCheck = await verifyRecaptchaToken(recaptchaToken, {
-          remoteIp: ip,
-          actorEmail: normalizedEmail,
-        });
-        if (!recaptchaCheck.success) {
-          return NextResponse.json(
-            { success: false, error: recaptchaCheck.error || 'reCAPTCHA verification failed. Please try again.' },
-            { status: 400 }
-          );
-        }
-      }
+      // Manual registration is verified strictly via 6-digit email OTP (no reCAPTCHA).
 
-      // 3. Check if SRN already exists in public.trainees or public.profiles
+      // 2. Check if SRN already exists in public.trainees or public.profiles
       if (await isSrnTaken(cleanSrn)) {
         return NextResponse.json(
           { success: false, error: 'This SRN is already associated with another trainee account.', code: 'DUPLICATE_SRN' },

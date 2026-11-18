@@ -17,6 +17,7 @@ import {
   sendGoogleNumberMatchEmail,
   escapeIlikePattern,
 } from '@newsim/auth';
+import { OAUTH_CAPTCHA_COOKIE, verifyOauthCaptchaPass } from '@/lib/oauth-captcha';
 
 function generateNumberMatchChallenge(targetNumber: number): number[] {
   const choices = new Set<number>([targetNumber]);
@@ -240,8 +241,41 @@ export async function GET(request: NextRequest) {
 
   // 4. Third-Party (Google) Registration:
   // Third-party registration is secured by reCAPTCHA on the registration page.
-  // When a new trainee registers via Google OAuth, provision their profile directly.
+  // A NEW account is only provisioned when the browser carries a valid, server-issued
+  // reCAPTCHA pass (set by POST /api/auth/recaptcha/verify right before OAuth started).
   if (isNewRegistration && !profile) {
+    const captchaPassValid = verifyOauthCaptchaPass(request.cookies.get(OAUTH_CAPTCHA_COOKIE)?.value);
+
+    if (flow !== 'register' || !captchaPassValid) {
+      // Remove the just-created, unprovisioned Supabase auth user so no orphan account remains.
+      const createdAtMs = authUser.created_at ? new Date(authUser.created_at).getTime() : 0;
+      if (createdAtMs && Date.now() - createdAtMs < 15 * 60 * 1000) {
+        try {
+          await supabaseAdmin.auth.admin.deleteUser(authUser.id);
+        } catch (cleanupErr) {
+          console.warn('OAuth callback: orphan auth user cleanup notice:', cleanupErr);
+        }
+      }
+
+      logAuditEvent({
+        actorEmail: authEmail || 'unknown',
+        actorRole: 'ANONYMOUS',
+        action: 'GOOGLE_REGISTRATION_RECAPTCHA_REJECTED',
+        targetType: 'USER',
+        details: { provider, flow, reason: flow !== 'register' ? 'not_registered' : 'recaptcha_missing_or_expired' },
+        ipAddress: ip,
+        userAgent,
+        status: 'FAILED',
+        severity: 'WARNING',
+      });
+
+      const errorCode = flow !== 'register' ? 'google_account_not_registered' : 'recaptcha_required';
+      const rejectResponse = NextResponse.redirect(`${origin}/register?error=${errorCode}`);
+      rejectResponse.cookies.delete('newsim_oauth_flow');
+      rejectResponse.cookies.delete('newsim_oauth_terms');
+      rejectResponse.cookies.delete(OAUTH_CAPTCHA_COOKIE);
+      return rejectResponse;
+    }
     const meta = authUser.user_metadata || {};
     const firstName =
       meta.given_name ||
@@ -485,6 +519,7 @@ export async function GET(request: NextRequest) {
   }
   response.cookies.delete('newsim_oauth_flow');
   response.cookies.delete('newsim_oauth_terms');
+  response.cookies.delete(OAUTH_CAPTCHA_COOKIE); // single-use reCAPTCHA pass
   setSessionCookies(response, token, 'TRAINEE');
 
   return response;

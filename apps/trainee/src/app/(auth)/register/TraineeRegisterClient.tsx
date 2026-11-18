@@ -22,6 +22,7 @@ import {
   getLastRecaptchaError,
   getRecaptchaV2SiteKey,
   getRecaptchaV3SiteKey,
+  loadRecaptchaScript,
   RecaptchaControl,
   HoneypotField,
   trackAnalyticsEvent,
@@ -43,6 +44,9 @@ export default function TraineeRegisterClient() {
   const searchParams = useSearchParams();
   const [authState, setAuthState] = useState<AuthState>("IDLE");
   const [error, setError] = useState<string | null>(null);
+  // Errors for the third-party (Google + reCAPTCHA) path are kept separate from the
+  // manual (email + OTP) form so one flow never blocks or confuses the other.
+  const [googleError, setGoogleError] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
 
   const [showPassword, setShowPassword] = useState(false);
@@ -87,8 +91,13 @@ export default function TraineeRegisterClient() {
         "Google sign-in succeeded, but we could not send the 2-digit security verification email. Please try again shortly.",
       google_signin_failed: "Unable to complete Google registration. Please try again.",
       oauth_callback_failed: "Google verification could not be completed. Please try again.",
+      oauth_pkce_missing: "Google verification session was lost. Please try Continue with Google again.",
+      recaptcha_required:
+        "Security check (reCAPTCHA) expired or was not completed. Please click Continue with Google again.",
+      google_account_not_registered:
+        "No NEWSIM account is linked to this Google account yet. Register with Google below (a quick reCAPTCHA security check is required).",
     };
-    setError(regErrorMap[errParam] || "Unable to complete registration. Please try again.");
+    setGoogleError(regErrorMap[errParam] || "Unable to complete registration. Please try again.");
   }, [searchParams]);
 
   useEffect(() => {
@@ -389,13 +398,14 @@ export default function TraineeRegisterClient() {
   const launchGoogleOAuth = async () => {
     if (socialClickLockRef.current) return;
     if (typeof navigator !== "undefined" && /FB_IAB|FBAN|FBAV|Instagram|Line\/|MicroMessenger|;\s*wv\)/i.test(navigator.userAgent)) {
-      setError("Google Sign-In is blocked inside embedded in-app browsers (such as Facebook or Messenger). Please open this page in Chrome or Safari and try again.");
+      setGoogleError("Google Sign-In is blocked inside embedded in-app browsers (such as Facebook or Messenger). Please open this page in Chrome or Safari and try again.");
+      setAuthState("IDLE");
       return;
     }
 
     socialClickLockRef.current = true;
     try {
-      setError(null);
+      setGoogleError(null);
       setGoogleTermsPrompt(false);
       setAuthState("LOADING");
 
@@ -420,45 +430,65 @@ export default function TraineeRegisterClient() {
     } catch (err: any) {
       socialClickLockRef.current = false;
       console.error('Google registration error:', err);
-      setError(err?.message || 'Failed to initialize Google registration.');
+      setGoogleError(err?.message || 'Failed to initialize Google registration.');
       setAuthState("IDLE");
     }
   };
 
-  const handleSocialRegister = async (_provider: 'Google' = 'Google') => {
-    if (!agreedToTerms) {
+  /**
+   * THIRD-PARTY (Google) REGISTRATION — protected by Google reCAPTCHA v2 ("I'm not a robot").
+   * 1. Require the user to complete the reCAPTCHA checkbox under "Continue with Google".
+   * 2. Verify the token server-side; the server issues a short-lived signed pass cookie.
+   * 3. Start Google OAuth. /auth/callback refuses to create a new account without that pass.
+   */
+  const handleSocialRegister = async (_provider: 'Google' = 'Google', termsJustAccepted = false) => {
+    if (authState === "LOADING") return;
+
+    const recaptchaToken = await executeRecaptchaChallenge('google_register', recaptchaV2Token);
+    if (!recaptchaToken) {
+      setGoogleError(
+        getLastRecaptchaError() ||
+          'Please complete the Google reCAPTCHA ("I\'m not a robot") checkbox above before continuing with Google.'
+      );
+      return;
+    }
+
+    if (!agreedToTerms && !termsJustAccepted) {
       setGoogleTermsPrompt(true);
-      setError("Please agree to the NEWSIM Terms and Conditions and Privacy Policy before registering with Google.");
+      setGoogleError("Please agree to the NEWSIM Terms and Conditions and Privacy Policy before registering with Google.");
       return;
     }
 
     setAuthState("LOADING");
+    setGoogleError(null);
     setError(null);
 
     try {
-      // Execute bot-protection check if available
-      try {
-        await executeRecaptchaChallenge('google_register', recaptchaV2Token);
-      } catch (captchaErr) {
-        console.warn('reCAPTCHA non-blocking notice for Google sign-in:', captchaErr);
+      const verifyRes = await fetch("/api/auth/recaptcha/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ token: recaptchaToken, action: "google_register" }),
+      });
+      const verifyData = await verifyRes.json().catch(() => ({}));
+      if (!verifyRes.ok || !verifyData?.success) {
+        // Token was rejected or expired on server -> reset the checkbox so user can tick again
+        setRecaptchaV2Token(null);
+        setRecaptchaResetCounter((c) => c + 1);
+        throw new Error(verifyData?.error || "reCAPTCHA verification failed. Please tick the checkbox again.");
       }
 
       await launchGoogleOAuth();
     } catch (err: any) {
-      setError(err?.message || "Failed to initialize Google registration.");
+      setGoogleError(err?.message || "Failed to initialize Google registration.");
       setAuthState("IDLE");
-    } finally {
-      if (getRecaptchaV2SiteKey()) {
-        setRecaptchaV2Token(null);
-        setRecaptchaResetCounter((c) => c + 1);
-      }
     }
   };
 
   const handleAgreeAndGoogleRegister = async () => {
     setAgreedToTerms(true);
     setGoogleTermsPrompt(false);
-    await handleSocialRegister('Google');
+    await handleSocialRegister('Google', true);
   };
 
   const containerVariants = {
@@ -504,11 +534,25 @@ export default function TraineeRegisterClient() {
                 variant="light"
               />
               <RecaptchaControl
-                onTokenChange={setRecaptchaV2Token}
+                onTokenChange={(tok) => {
+                  setRecaptchaV2Token(tok);
+                  if (tok && googleError?.toLowerCase().includes("recaptcha")) {
+                    setGoogleError(null);
+                  }
+                }}
                 theme="light"
                 resetSignal={recaptchaResetCounter}
                 className="pt-1"
               />
+              {googleError && (
+                <div
+                  role="alert"
+                  className="bg-red-500/10 border border-red-500/20 text-red-500 p-3 rounded-md text-xs flex items-start"
+                >
+                  <AlertCircle className="w-4 h-4 mr-2 mt-0.5 shrink-0" />
+                  <span>{googleError}</span>
+                </div>
+              )}
               {googleTermsPrompt && !agreedToTerms && (
                 <div className="rounded-lg border border-[#0B3D91]/25 bg-[#0B3D91]/5 p-3 text-xs text-slate-800 space-y-2.5">
                   <p className="leading-relaxed">
@@ -675,6 +719,9 @@ export default function TraineeRegisterClient() {
                           if (error?.includes("Terms and Conditions")) {
                             setError(null);
                           }
+                          if (googleError?.includes("Terms and Conditions")) {
+                            setGoogleError(null);
+                          }
                         }
                       }}
                       disabled={authState === "LOADING"} 
@@ -778,12 +825,6 @@ export default function TraineeRegisterClient() {
             >
               VERIFY OTP CODE
             </Button>
-
-            {getRecaptchaV2SiteKey() && (
-              <div className="flex justify-center">
-                <RecaptchaControl onTokenChange={setRecaptchaV2Token} theme="light" resetSignal={recaptchaResetCounter} />
-              </div>
-            )}
 
             <div className="text-center">
               <button

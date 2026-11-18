@@ -1,8 +1,12 @@
 'use client';
 
 import React, { useEffect, useRef } from 'react';
-import { ShieldCheck } from 'lucide-react';
-import { getRecaptchaV2SiteKey, getWindowGrecaptcha, loadRecaptchaScript } from './recaptcha-client';
+import {
+  getRecaptchaV2SiteKey,
+  getWindowGrecaptcha,
+  loadRecaptchaScript,
+  resolveActiveRecaptchaV2SiteKey,
+} from './recaptcha-client';
 
 export interface RecaptchaControlProps {
   onTokenChange?: (token: string | null) => void;
@@ -12,8 +16,8 @@ export interface RecaptchaControlProps {
 }
 
 /**
- * Renders Google reCAPTCHA v2 checkbox widget when NEXT_PUBLIC_RECAPTCHA_V2_SITE_KEY
- * is configured, or a compact bot-protection notice when invisible reCAPTCHA v3 is active.
+ * Renders the interactive Google reCAPTCHA v2 ("I'm not a robot") checkbox widget
+ * for third-party (Google OAuth) registration.
  */
 export function RecaptchaControl({
   onTokenChange,
@@ -21,60 +25,55 @@ export function RecaptchaControl({
   className = '',
   resetSignal = 0,
 }: RecaptchaControlProps) {
-  const v2SiteKey = getRecaptchaV2SiteKey();
   const containerRef = useRef<HTMLDivElement>(null);
   const widgetIdRef = useRef<number | null>(null);
+  const onTokenChangeRef = useRef(onTokenChange);
+  onTokenChangeRef.current = onTokenChange;
 
   useEffect(() => {
-    if (!v2SiteKey || widgetIdRef.current === null || resetSignal === 0) return;
+    if (widgetIdRef.current === null || resetSignal === 0) return;
     const gc = getWindowGrecaptcha();
     if (gc && typeof gc.reset === 'function') {
-      gc.reset(widgetIdRef.current);
-      onTokenChange?.(null);
+      try {
+        gc.reset(widgetIdRef.current);
+      } catch {
+        // ignore reset race
+      }
+      onTokenChangeRef.current?.(null);
     }
-  }, [resetSignal, v2SiteKey, onTokenChange]);
+  }, [resetSignal]);
 
   useEffect(() => {
-    if (!v2SiteKey || !containerRef.current) return;
+    if (!containerRef.current) return;
     let active = true;
 
-    loadRecaptchaScript('v2', v2SiteKey).then(() => {
+    (async () => {
+      const siteKey = (await resolveActiveRecaptchaV2SiteKey()) || getRecaptchaV2SiteKey();
+      if (!active || !siteKey) return;
+
+      await loadRecaptchaScript('v2', siteKey);
       const gc = getWindowGrecaptcha();
       if (!active || !containerRef.current || !gc?.render) return;
       if (widgetIdRef.current !== null) return;
 
+      containerRef.current.innerHTML = '';
       widgetIdRef.current = gc.render(containerRef.current, {
-        sitekey: v2SiteKey,
+        sitekey: siteKey,
         theme,
-        callback: (token: string) => onTokenChange?.(token),
-        'expired-callback': () => onTokenChange?.(null),
-        'error-callback': () => onTokenChange?.(null),
+        callback: (token: string) => onTokenChangeRef.current?.(token),
+        'expired-callback': () => onTokenChangeRef.current?.(null),
+        'error-callback': () => onTokenChangeRef.current?.(null),
       });
-    });
+    })();
 
     return () => {
       active = false;
     };
-  }, [v2SiteKey, theme, onTokenChange]);
-
-  if (v2SiteKey) {
-    return (
-      <div className={`flex flex-col gap-1.5 ${className}`}>
-        <div ref={containerRef} className="overflow-x-auto max-w-full" />
-      </div>
-    );
-  }
+  }, [theme]);
 
   return (
-    <div
-      className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-[11px] ${
-        theme === 'dark'
-          ? 'border-white/10 bg-white/5 text-slate-300'
-          : 'border-slate-200 bg-slate-50 text-slate-600'
-      } ${className}`}
-    >
-      <ShieldCheck className="w-4 h-4 shrink-0 text-sky-500" />
-      <span>Protected against automated abuse with Google reCAPTCHA &amp; rate limiting.</span>
+    <div className={`flex flex-col items-center gap-1.5 ${className}`}>
+      <div ref={containerRef} className="overflow-x-auto max-w-full min-h-[78px] flex items-center justify-center" />
     </div>
   );
 }
