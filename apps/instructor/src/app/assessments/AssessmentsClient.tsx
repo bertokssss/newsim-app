@@ -82,6 +82,7 @@ export default function AssessmentsClient() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('ALL');
+  const [inventoryCourseId, setInventoryCourseId] = useState('ALL');
   const [selectedAssessment, setSelectedAssessment] = useState<any | null>(null);
   const [submissions, setSubmissions] = useState<any[]>([]);
   const [submissionModalOpen, setSubmissionModalOpen] = useState(false);
@@ -119,6 +120,7 @@ export default function AssessmentsClient() {
       const query = new URLSearchParams();
       if (search) query.set('search', search);
       if (typeFilter !== 'ALL') query.set('type', typeFilter);
+      if (inventoryCourseId && inventoryCourseId !== 'ALL') query.set('courseId', inventoryCourseId);
 
       const res = await fetch(`/api/instructor/assessments?${query.toString()}`);
       const json = await res.json();
@@ -134,7 +136,7 @@ export default function AssessmentsClient() {
 
   useEffect(() => {
     fetchAssessments();
-  }, [search, typeFilter]);
+  }, [search, typeFilter, inventoryCourseId]);
 
   // 2. Fetch Courses for Tab 2
   useEffect(() => {
@@ -145,6 +147,9 @@ export default function AssessmentsClient() {
         if (json.success && Array.isArray(json.data) && json.data.length > 0) {
           setCourses(json.data);
           setSelectedCourseId(json.data[0].id);
+          if (json.data.length === 1) {
+            setInventoryCourseId(json.data[0].id);
+          }
         }
       } catch (err) {
         console.error('Failed to load courses:', err);
@@ -152,6 +157,17 @@ export default function AssessmentsClient() {
     };
     loadCourses();
   }, []);
+
+  const selectedCourseObj = courses.find((c: any) => c.id === selectedCourseId) || null;
+  const isSelectedCourseFullModular = Boolean(
+    selectedCourseObj &&
+      (selectedCourseObj.deliveryMode === 'FULL_MODULAR' ||
+        selectedCourseObj.requiresPractical === false ||
+        Number(selectedCourseObj.practicalDays ?? 1) === 0 ||
+        String(selectedCourseObj.category || '').toLowerCase().includes('in-house') ||
+        (String(selectedCourseObj.category || '').toLowerCase().includes('modular') &&
+          !String(selectedCourseObj.category || '').toLowerCase().includes('practical')))
+  );
 
   // 3. Fetch Rubrics when selectedCourseId changes
   useEffect(() => {
@@ -446,19 +462,43 @@ export default function AssessmentsClient() {
       {activeTab === 'ASSESSMENTS' && (
         <div className="space-y-6">
           {/* Search & Filter Bar */}
-          <div className="p-4 rounded-2xl bg-white dark:bg-[#0c1a2c] border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div className="relative w-full sm:w-96">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search assessment code, title, course..."
-                className="w-full pl-9 pr-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-[#F8FAFC] placeholder:text-slate-400 outline-none focus:border-sky-500 transition-colors"
-              />
+          <div className="p-4 rounded-2xl bg-white dark:bg-[#0c1a2c] border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 flex-1">
+              <div className="relative flex-1 max-w-md">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search assessment code, title, course..."
+                  className="w-full pl-9 pr-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-[#F8FAFC] placeholder:text-slate-400 outline-none focus:border-sky-500 transition-colors"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <label className="text-[10px] font-mono font-bold uppercase text-slate-400 shrink-0">
+                  Assigned Course:
+                </label>
+                <select
+                  value={inventoryCourseId}
+                  onChange={(e) => setInventoryCourseId(e.target.value)}
+                  className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-xs font-mono font-bold text-slate-900 dark:text-[#F8FAFC] outline-none cursor-pointer"
+                >
+                  {courses.length > 1 && <option value="ALL">All Assigned Courses ({courses.length})</option>}
+                  {courses.length === 0 ? (
+                    <option value="ALL">No Assigned Courses</option>
+                  ) : (
+                    courses.map((c: any) => (
+                      <option key={c.id} value={c.id}>
+                        {c.code ? `[${c.code}] ` : ''}{c.title || c.name}
+                      </option>
+                    ))
+                  )}
+                </select>
+              </div>
             </div>
 
-            <div className="flex items-center gap-2 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0">
+            <div className="flex items-center gap-2 overflow-x-auto w-full lg:w-auto pb-1 lg:pb-0">
               {['ALL', 'MODULAR', 'PRACTICAL', 'FINAL', 'QUIZ'].map((type) => (
                 <button
                   key={type}
@@ -669,53 +709,97 @@ export default function AssessmentsClient() {
                   {courses.length === 0 ? (
                     <option value="">No courses assigned</option>
                   ) : (
-                    courses.map((c: any) => (
-                      <option key={c.id} value={c.id}>
-                        {c.code ? `${c.code}: ` : ''}{c.title || c.name}
-                      </option>
-                    ))
+                    courses.map((c: any) => {
+                      const isModOnly =
+                        c.deliveryMode === 'FULL_MODULAR' ||
+                        c.requiresPractical === false ||
+                        Number(c.practicalDays ?? 1) === 0 ||
+                        String(c.category || '').toLowerCase().includes('in-house');
+                      return (
+                        <option key={c.id} value={c.id}>
+                          {c.code ? `${c.code}: ` : ''}{c.title || c.name}{isModOnly ? ' (Full Modular — No Practical Rubric)' : ''}
+                        </option>
+                      );
+                    })
                   )}
                 </select>
               </div>
 
-              <div className="flex items-center gap-2">
-                <label className="text-xs font-mono font-bold uppercase text-slate-400 shrink-0">
-                  Rubric:
-                </label>
-                <select
-                  value={selectedRubricId}
-                  onChange={(e) => setSelectedRubricId(e.target.value)}
-                  className="px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-xs font-mono font-bold text-slate-900 dark:text-[#F8FAFC] outline-none"
-                >
-                  {loadingRubrics ? (
-                    <option value="">Loading course rubrics...</option>
-                  ) : rubrics.length === 0 ? (
-                    <option value="">No practical rubrics defined</option>
-                  ) : (
-                    rubrics.map((r) => (
-                      <option key={r.id} value={r.id}>
-                        {r.title} ({r.stcwReference})
-                      </option>
-                    ))
-                  )}
-                </select>
-              </div>
+              {!isSelectedCourseFullModular && (
+                <div className="flex items-center gap-2">
+                  <label className="text-xs font-mono font-bold uppercase text-slate-400 shrink-0">
+                    Rubric:
+                  </label>
+                  <select
+                    value={selectedRubricId}
+                    onChange={(e) => setSelectedRubricId(e.target.value)}
+                    className="px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-xs font-mono font-bold text-slate-900 dark:text-[#F8FAFC] outline-none"
+                  >
+                    {loadingRubrics ? (
+                      <option value="">Loading course rubrics...</option>
+                    ) : rubrics.length === 0 ? (
+                      <option value="">No practical rubrics defined</option>
+                    ) : (
+                      rubrics.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.title} ({r.stcwReference})
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
+              )}
             </div>
 
-            <div className="relative w-full md:w-64">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={rosterSearch}
-                onChange={(e) => setRosterSearch(e.target.value)}
-                placeholder="Search trainee name or SRN..."
-                className="w-full pl-9 pr-4 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-[#F8FAFC] placeholder:text-slate-400 outline-none"
-              />
-            </div>
+            {!isSelectedCourseFullModular && (
+              <div className="relative w-full md:w-64">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={rosterSearch}
+                  onChange={(e) => setRosterSearch(e.target.value)}
+                  placeholder="Search trainee name or SRN..."
+                  className="w-full pl-9 pr-4 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-[#F8FAFC] placeholder:text-slate-400 outline-none"
+                />
+              </div>
+            )}
           </div>
 
+          {isSelectedCourseFullModular && (
+            <div className="p-6 rounded-3xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800/60 shadow-sm space-y-3 font-mono text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-indigo-800 dark:text-indigo-200 font-bold text-sm font-heading">
+                  <ShieldCheck className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                  <span>Full Modular / In-House Course — No Practical Rubrics Required</span>
+                </div>
+                <span className="px-2.5 py-1 rounded-full bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border border-indigo-500/30 text-[10px] font-bold uppercase">
+                  100% Modular Theory • 0 Practical Days
+                </span>
+              </div>
+              <p className="text-slate-600 dark:text-slate-300 font-sans leading-relaxed">
+                <strong>{selectedCourseObj?.code ? `[${selectedCourseObj.code}] ` : ''}{selectedCourseObj?.title || 'This course'}</strong> is a Full Modular course. Trainees complete online lessons, 10-question module quizzes, and the 10-question final post-test within 3 days. There are no practical simulator rubrics or physical attendance dates; your responsibility as the assigned instructor is <strong>Academic Record Review</strong>.
+              </p>
+              <div className="pt-1 flex flex-wrap items-center gap-3">
+                <Link
+                  href="/grades"
+                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-sm transition-all inline-flex items-center gap-1.5"
+                >
+                  <GraduationCap className="w-4 h-4" />
+                  <span>Open Modular Gradebook &amp; Record Review →</span>
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('ASSESSMENTS')}
+                  className="px-4 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-200 font-bold text-xs hover:border-indigo-500 transition-all cursor-pointer"
+                >
+                  View 10-Question Modular Quizzes
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Active Rubric Specifications Card (Section 2.2) */}
-          {rubricDetails && (
+          {!isSelectedCourseFullModular && rubricDetails && (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
@@ -796,6 +880,7 @@ export default function AssessmentsClient() {
           )}
 
           {/* Trainee Evaluation Roster Table (Section 2.1) */}
+          {!isSelectedCourseFullModular && (
           <motion.div
             initial={{ opacity: 0, y: 15 }}
             animate={{ opacity: 1, y: 0 }}
@@ -927,6 +1012,7 @@ export default function AssessmentsClient() {
               </table>
             </div>
           </motion.div>
+          )}
         </div>
       )}
 

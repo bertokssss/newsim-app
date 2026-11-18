@@ -1,6 +1,6 @@
 import { supabaseAdmin } from '../supabase';
 import { dispatchNotificationEvent, NOTIFICATION_EVENTS } from './notifications';
-import { calculateTraineeCourseGrade } from './grading';
+import { calculateTraineeCourseGrade, isInHouseModularCourse } from './grading';
 import { getInstructorCourseIds } from './instructor-portal';
 
 export interface RubricCriterion {
@@ -82,7 +82,7 @@ export async function getPracticalRubricsList(courseId?: string): Promise<Practi
       passing_score,
       max_score,
       status,
-      courses ( id, code, name )
+      courses ( id, code, name, category, practical_days )
     `)
     .eq('status', 'ACTIVE');
 
@@ -93,7 +93,11 @@ export async function getPracticalRubricsList(courseId?: string): Promise<Practi
   const { data: rubrics, error } = await query;
   if (error) throw error;
 
-  const rubricsList = rubrics || [];
+  // Full modular courses must never expose practical rubrics
+  const rubricsList = (rubrics || []).filter((r: any) => {
+    const courseRel = Array.isArray(r.courses) ? r.courses[0] : r.courses;
+    return !isInHouseModularCourse(courseRel?.category, courseRel?.practical_days);
+  });
   if (rubricsList.length === 0) return [];
 
   const rubricIds = rubricsList.map((r: any) => r.id).filter(Boolean);
@@ -162,12 +166,17 @@ export async function getPracticalRubricDetails(rubricId: string): Promise<Pract
       passing_score,
       max_score,
       status,
-      courses ( id, code, name )
+      courses ( id, code, name, category, practical_days )
     `)
     .eq('id', rubricId)
     .maybeSingle();
 
   if (error || !r) return null;
+
+  const courseRelCheck = Array.isArray(r.courses) ? r.courses[0] : r.courses;
+  if (isInHouseModularCourse(courseRelCheck?.category, courseRelCheck?.practical_days)) {
+    return null;
+  }
 
   const { data: criteria } = await supabaseAdmin
     .from('practical_rubric_criteria')

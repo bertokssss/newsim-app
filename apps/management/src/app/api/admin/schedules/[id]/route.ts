@@ -24,6 +24,13 @@ export async function PATCH(
     const body = await request.json();
     const { ip, userAgent } = requestMeta(request);
 
+    if (id.startsWith('modular:')) {
+      return NextResponse.json({
+        success: true,
+        data: { id, status: String(body.status || 'SCHEDULED').toUpperCase() },
+      });
+    }
+
     // Fetch existing schedule
     const { data: existing, error: fetchErr } = await supabaseAdmin
       .from('schedules')
@@ -156,6 +163,19 @@ export async function DELETE(
     const { ip, userAgent } = requestMeta(request);
     const { searchParams } = new URL(request.url);
     const permanent = searchParams.get('permanent') === 'true';
+
+    if (id.startsWith('modular:')) {
+      const parts = id.split(':');
+      const courseId = parts[1];
+      if (courseId) {
+        await supabaseAdmin.from('course_instructors').delete().eq('course_id', courseId);
+        await supabaseAdmin.from('batches').update({ instructor_id: null }).eq('course_id', courseId);
+      }
+      return NextResponse.json({
+        success: true,
+        message: 'Full Modular course assignment removed',
+      });
+    }
 
     const { data: schedule, error: getError } = await supabaseAdmin
       .from('schedules')

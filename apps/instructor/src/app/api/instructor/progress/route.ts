@@ -10,8 +10,9 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const search = searchParams.get('search')?.toLowerCase() || '';
     const status = searchParams.get('status') || 'ALL';
+    const courseId = searchParams.get('courseId') || 'ALL';
 
-    const progress = await getInstructorProgressData(instructorId, { search, status });
+    const progress = await getInstructorProgressData(instructorId, { search, status, courseId });
 
     return NextResponse.json({ success: true, data: progress });
   } catch (error) {

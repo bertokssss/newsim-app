@@ -76,11 +76,27 @@ const cascadeItem = {
 
 export default function ProgressClient() {
   const [progressList, setProgressList] = useState<any[]>([]);
+  const [courses, setCourses] = useState<any[]>([]);
+  const [courseFilter, setCourseFilter] = useState('ALL');
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [chartMetric, setChartMetric] = useState<'DISTRIBUTION' | 'STATUS' | 'PERFORMANCE'>('DISTRIBUTION');
   const [chartInView, setChartInView] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/instructor/my-courses')
+      .then((r) => r.json())
+      .then((json) => {
+        if (json.success && Array.isArray(json.data)) {
+          setCourses(json.data);
+          if (json.data.length === 1) {
+            setCourseFilter(json.data[0].id);
+          }
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const fetchProgress = async () => {
     try {
@@ -88,6 +104,7 @@ export default function ProgressClient() {
       const query = new URLSearchParams();
       if (search) query.set('search', search);
       if (statusFilter !== 'ALL') query.set('status', statusFilter);
+      if (courseFilter && courseFilter !== 'ALL') query.set('courseId', courseFilter);
 
       const res = await fetch(`/api/instructor/progress?${query.toString()}`);
       const json = await res.json();
@@ -103,7 +120,7 @@ export default function ProgressClient() {
 
   useEffect(() => {
     fetchProgress();
-  }, [search, statusFilter]);
+  }, [search, statusFilter, courseFilter]);
 
   const telemetryData = useMemo(() => {
     const bands = [
@@ -364,19 +381,43 @@ export default function ProgressClient() {
       </motion.div>
 
       {/* Filter and Search Bar */}
-      <div className="p-4 rounded-2xl bg-white dark:bg-[#0c1a2c] border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
-        <div className="relative w-full sm:w-96">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search seafarer, SRN, rank, program..."
-            className="w-full pl-9 pr-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-[#F8FAFC] placeholder:text-slate-400 outline-none focus:border-sky-500 transition-colors"
-          />
+      <div className="p-4 rounded-2xl bg-white dark:bg-[#0c1a2c] border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 flex-1">
+          <div className="relative flex-1 max-w-md">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search seafarer, SRN, rank, program..."
+              className="w-full pl-9 pr-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-[#F8FAFC] placeholder:text-slate-400 outline-none focus:border-sky-500 transition-colors"
+            />
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-mono font-bold uppercase text-slate-400 shrink-0">
+              Assigned Course:
+            </span>
+            <select
+              value={courseFilter}
+              onChange={(e) => setCourseFilter(e.target.value)}
+              className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-xs font-mono font-bold text-slate-900 dark:text-[#F8FAFC] outline-none cursor-pointer"
+            >
+              {courses.length > 1 && <option value="ALL">All Assigned Courses ({courses.length})</option>}
+              {courses.length === 0 ? (
+                <option value="ALL">No Assigned Courses</option>
+              ) : (
+                courses.map((c: any) => (
+                  <option key={c.id} value={c.id}>
+                    {c.code ? `[${c.code}] ` : ''}{c.title || c.name}
+                  </option>
+                ))
+              )}
+            </select>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0">
+        <div className="flex items-center gap-2 overflow-x-auto w-full lg:w-auto pb-1 lg:pb-0">
           {['ALL', 'ON_TRACK', 'AT_RISK', 'BEHIND', 'COMPLETED'].map((st) => (
             <button
               key={st}
@@ -484,8 +525,10 @@ export default function ProgressClient() {
                     <div className="font-bold text-slate-900 dark:text-[#F8FAFC] mt-0.5">{p.modulesCompleted} / {p.totalModules}</div>
                   </div>
                   <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200/50 dark:border-slate-800">
-                    <span className="text-[10px] text-slate-400 uppercase">Attendance</span>
-                    <div className="font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">{p.attendanceRate}</div>
+                    <span className="text-[10px] text-slate-400 uppercase">{p.isFullModular ? 'Course Mode' : 'Attendance'}</span>
+                    <div className={`font-bold mt-0.5 ${p.isFullModular ? 'text-indigo-600 dark:text-indigo-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                      {p.isFullModular ? 'Full Modular' : p.attendanceRate}
+                    </div>
                   </div>
                   <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200/50 dark:border-slate-800">
                     <span className="text-[10px] text-slate-400 uppercase">Avg Grade</span>
@@ -495,9 +538,16 @@ export default function ProgressClient() {
               </div>
 
               <div className="mt-5 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs font-mono text-slate-400">
-                <span>Active: {new Date(p.lastActiveAt).toLocaleDateString()}</span>
+                <span>
+                  Active:{' '}
+                  {p.lastActiveAt && !isNaN(new Date(p.lastActiveAt).getTime())
+                    ? new Date(p.lastActiveAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                    : 'Today'}
+                </span>
                 {p.status === 'AT_RISK' && (
-                  <span className="text-rose-600 dark:text-rose-400 font-bold">⚠️ Remedial Drill Required</span>
+                  <span className="text-rose-600 dark:text-rose-400 font-bold">
+                    {p.isFullModular ? '⚠️ Academic Review Needed' : '⚠️ Remedial Drill Required'}
+                  </span>
                 )}
               </div>
               </motion.div>

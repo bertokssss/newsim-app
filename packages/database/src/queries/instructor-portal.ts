@@ -680,11 +680,17 @@ export async function getInstructorTraineeDetails(traineeId: string, profileId?:
  */
 export async function getInstructorAssessmentsList(
   profileId?: string,
-  filters?: { search?: string; type?: string }
+  filters?: { search?: string; type?: string; courseId?: string }
 ) {
   const resolvedId = await resolveInstructorProfileId(profileId);
   const courseIds = await getInstructorCourseIds(resolvedId);
   if (courseIds.length === 0) return [];
+
+  const targetCourseIds =
+    filters?.courseId && filters.courseId !== 'ALL'
+      ? courseIds.filter((cid) => cid === filters.courseId)
+      : courseIds;
+  if (targetCourseIds.length === 0) return [];
 
   let query = supabaseAdmin
     .from('assessments')
@@ -697,14 +703,14 @@ export async function getInstructorAssessmentsList(
       passing_score,
       duration_minutes,
       course_id,
-      courses ( id, name, code ),
+      courses ( id, name, code, category, practical_days ),
       course_modules ( id, title, sort_order )
     `)
-    .in('course_id', courseIds);
+    .in('course_id', targetCourseIds);
 
   if (filters?.type && filters.type !== 'ALL') {
     if (filters.type === 'MODULAR') {
-      query = query.not('module_id', 'is', null);
+      // Handled post-query so Full Modular post-tests are included under MODULAR
     } else if (filters.type === 'PRACTICAL') {
       query = query.is('module_id', null);
     } else {
@@ -723,10 +729,13 @@ export async function getInstructorAssessmentsList(
   if (assessmentIds.length > 0) {
     const { data: allAttempts } = await supabaseAdmin
       .from('assessment_attempts')
-      .select('id, assessment_id, score, status, passed')
+      .select('id, assessment_id, score, status, passed, submitted_at')
       .in('assessment_id', assessmentIds);
 
     (allAttempts || []).forEach((att: any) => {
+      if (Number(att.score) === 0 && att.status === 'FAILED' && String(att.submitted_at || '').includes('59:59')) {
+        return;
+      }
       const list = attemptsByAssessmentId.get(att.assessment_id) || [];
       list.push(att);
       attemptsByAssessmentId.set(att.assessment_id, list);
@@ -743,22 +752,29 @@ export async function getInstructorAssessmentsList(
     const highestScore = submissionsCount > 0 ? Math.max(...scores) : 0;
     const lowestScore = submissionsCount > 0 ? Math.min(...scores) : 0;
 
-    const isModular = Boolean(a.module_id);
+    const isCourseFullModular = isInHouseModularCourse(a.courses?.category, a.courses?.practical_days);
+    const isModuleQuiz = Boolean(a.module_id);
+    const isModular = isModuleQuiz || isCourseFullModular;
     const modOrder = (a.course_modules as any)?.sort_order;
-    const code = isModular
+    const code = isModuleQuiz
       ? `MOD-${modOrder ?? (a.title.match(/Module\s*(\d+)/i)?.[1] || 'PRE')}`
+      : isCourseFullModular
+      ? 'MOD-POST'
       : 'PRAC-POST';
 
     return {
       id: a.id,
       code,
-      title: a.title || (isModular ? 'Module Competency Pre-Test' : 'Course Practical Evaluation'),
+      title: a.title || (isModuleQuiz ? 'Module Competency Pre-Test' : isCourseFullModular ? 'Course Modular Post-Test' : 'Course Practical Evaluation'),
       category: isModular ? 'MODULAR' : 'PRACTICAL',
       type: isModular ? 'MODULAR_THEORY' : (a.assessment_type || 'PRACTICAL_SIMULATOR'),
+      isFullModular: isCourseFullModular,
+      requiresPractical: !isCourseFullModular,
       courseId: a.course_id,
       courseCode: a.courses?.code || 'STCW',
       courseTitle: a.courses?.name || 'Maritime Course',
       totalPoints: 100,
+      totalQuestions: 10,
       passingScore: passingThreshold,
       durationMinutes: a.duration_minutes || 45,
       submissionsCount,
@@ -770,6 +786,13 @@ export async function getInstructorAssessmentsList(
   });
 
   let result = enriched;
+  if (filters?.type && filters.type !== 'ALL') {
+    if (filters.type === 'MODULAR') {
+      result = result.filter((a: any) => a.category === 'MODULAR');
+    } else if (filters.type === 'PRACTICAL') {
+      result = result.filter((a: any) => a.category === 'PRACTICAL');
+    }
+  }
   if (filters?.search) {
     const s = filters.search.toLowerCase();
     result = result.filter(
@@ -881,27 +904,39 @@ export async function getInstructorGradebookData(courseId: string, profileId?: s
     }
   }
 
-  // Fetch assessments for this course with module info
-  const { data: assessmentsData, error: asmError } = await supabaseAdmin
-    .from('assessments')
-    .select(`
-      id,
-      title,
-      assessment_type,
-      module_id,
-      passing_score,
-      course_modules ( id, title, sort_order )
-    `)
-    .eq('course_id', courseId);
+  // Fetch course info and assessments for this course with module info
+  const [{ data: courseRow }, { data: assessmentsData, error: asmError }] = await Promise.all([
+    supabaseAdmin
+      .from('courses')
+      .select('id, code, name, category, practical_days')
+      .eq('id', courseId)
+      .maybeSingle(),
+    supabaseAdmin
+      .from('assessments')
+      .select(`
+        id,
+        title,
+        assessment_type,
+        module_id,
+        passing_score,
+        course_modules ( id, title, sort_order )
+      `)
+      .eq('course_id', courseId),
+  ]);
 
   if (asmError) throw asmError;
 
+  const isCourseFullModular = isInHouseModularCourse(courseRow?.category, courseRow?.practical_days);
+
   const assessments = (assessmentsData || [])
     .map((a: any) => {
-      const isModular = Boolean(a.module_id);
+      const isModuleQuiz = Boolean(a.module_id);
+      const isModular = isModuleQuiz || isCourseFullModular;
       const modOrder = (a.course_modules as any)?.sort_order;
-      const code = isModular
+      const code = isModuleQuiz
         ? `MOD-${modOrder ?? (a.title.match(/Module\s*(\d+)/i)?.[1] || 'PRE')}`
+        : isCourseFullModular
+        ? 'MOD-POST'
         : (a.title.toLowerCase().includes('post') ? 'PRAC-POST' : 'PRAC-SIM');
 
       return {
@@ -911,8 +946,9 @@ export async function getInstructorGradebookData(courseId: string, profileId?: s
         category: isModular ? 'MODULAR' : 'PRACTICAL',
         type: isModular ? 'MODULAR_THEORY' : 'PRACTICAL_SIMULATOR',
         totalPoints: 100,
+        totalQuestions: 10,
         passingScore: Number(a.passing_score) || 75,
-        sortOrder: isModular ? (modOrder ?? 1) : 999,
+        sortOrder: isModuleQuiz ? (modOrder ?? 1) : 999,
       };
     })
     .sort((x: any, y: any) => {
@@ -921,7 +957,9 @@ export async function getInstructorGradebookData(courseId: string, profileId?: s
     });
 
   const modularAssessments = assessments.filter((a: any) => a.category === 'MODULAR');
-  const practicalAssessments = assessments.filter((a: any) => a.category === 'PRACTICAL');
+  const practicalAssessments = isCourseFullModular
+    ? []
+    : assessments.filter((a: any) => a.category === 'PRACTICAL');
 
   // Fetch enrolled trainees for this course
   const { data: enrollments } = await supabaseAdmin
@@ -980,8 +1018,8 @@ export async function getInstructorGradebookData(courseId: string, profileId?: s
   const practicalEvalMap = new Map<string, any>((practicalEvalsData || []).map((pe: any) => [pe.trainee_id, pe]));
   const courseGradeMap = new Map<string, any>((courseGradesData || []).map((cg: any) => [cg.trainee_id, cg]));
 
-  // If no practical assessment exists in assessments table but a practical rubric evaluation exists, add a virtual practical column
-  if (practicalAssessments.length === 0 && (practicalEvalsData || []).length > 0) {
+  // If no practical assessment exists in assessments table but a practical rubric evaluation exists, add a virtual practical column (only for Modular + Practical courses)
+  if (!isCourseFullModular && practicalAssessments.length === 0 && (practicalEvalsData || []).length > 0) {
     const firstPe = (practicalEvalsData || [])[0] as any;
     const rub = firstPe?.practical_rubrics;
     const rubricCol = {
@@ -1722,7 +1760,7 @@ export async function recordInstructorAttendance(
  */
 export async function getInstructorProgressData(
   profileId?: string,
-  filters?: { search?: string; status?: string }
+  filters?: { search?: string; status?: string; courseId?: string }
 ) {
   const resolvedId = await resolveInstructorProfileId(profileId);
   const courseIds = await getInstructorCourseIds(resolvedId);
@@ -1732,110 +1770,258 @@ export async function getInstructorProgressData(
     return [];
   }
 
-  // Fetch enrollments strictly in instructor courses
+  const scopedCourseIds =
+    filters?.courseId && filters.courseId !== 'ALL'
+      ? courseIds.filter((cid) => cid === filters.courseId)
+      : courseIds;
+  if (scopedCourseIds.length === 0) {
+    return [];
+  }
+
+  // Fetch enrollments strictly in instructor's assigned courses
   const { data: enrollments } = await supabaseAdmin
     .from('enrollments')
-    .select('trainee_id, course_id, status, courses(name)')
-    .in('course_id', courseIds);
+    .select('id, trainee_id, course_id, status, created_at, enrolled_at, completed_at, courses(id, code, name, category, practical_days)')
+    .in('course_id', scopedCourseIds)
+    .not('status', 'in', '("CANCELLED","REJECTED")')
+    .order('created_at', { ascending: false });
 
-  const enrolledList = enrollments || [];
+  // Deduplicate by (trainee_id, course_id), prioritizing ACTIVE / ONGOING / ENROLLED over older rows
+  const enrollmentKeyMap = new Map<string, any>();
+  const statusPriority = (st: string) => {
+    const u = (st || '').toUpperCase();
+    if (u === 'ACTIVE' || u === 'ONGOING' || u === 'ENROLLED' || u === 'APPROVED') return 1;
+    if (u === 'COMPLETED') return 2;
+    return 3;
+  };
+  for (const enr of enrollments || []) {
+    if (!enr.trainee_id || !enr.course_id) continue;
+    const key = `${enr.trainee_id}:${enr.course_id}`;
+    const existing = enrollmentKeyMap.get(key);
+    if (!existing || statusPriority(enr.status) < statusPriority(existing.status)) {
+      enrollmentKeyMap.set(key, enr);
+    }
+  }
+
+  const enrolledList = Array.from(enrollmentKeyMap.values());
   const traineeIds = Array.from(new Set(enrolledList.map((e: any) => e.trainee_id)));
 
   if (traineeIds.length === 0) return [];
 
-  // Fetch trainee profiles, metadata, courses, modules, attempts, and attendance in parallel bulk queries
-  const [profilesRes, traineesMetaRes, coursesRes, modulesRes, attemptsRes, attRecordsRes] = await Promise.all([
+  // Fetch trainee profiles, metadata, courses, modules, lesson completions, daily tracking, assessments, attempts, attendance, and grades in parallel
+  const [
+    profilesRes,
+    traineesMetaRes,
+    coursesRes,
+    modulesRes,
+    lessonCompsRes,
+    dailyTrackingRes,
+    assessmentsRes,
+    attemptsRes,
+    attRecordsRes,
+    gradesRes,
+  ] = await Promise.all([
     supabaseAdmin
       .from('profiles')
-      .select('id, first_name, last_name, avatar_url')
+      .select('id, first_name, last_name, avatar_url, updated_at')
       .in('id', traineeIds),
     supabaseAdmin
       .from('trainees')
-      .select('profile_id, trainee_number, gender')
+      .select('profile_id, trainee_number, srn, gender')
       .in('profile_id', traineeIds),
     supabaseAdmin
       .from('courses')
-      .select('id, name')
-      .in('id', courseIds),
+      .select('id, code, name, category, practical_days')
+      .in('id', scopedCourseIds),
     supabaseAdmin
       .from('course_modules')
-      .select('course_id')
-      .in('course_id', courseIds),
+      .select('id, course_id')
+      .in('course_id', scopedCourseIds),
+    supabaseAdmin
+      .from('trainee_lesson_completions')
+      .select('trainee_id, course_id, module_id, lesson_id, completed_at')
+      .in('trainee_id', traineeIds)
+      .in('course_id', scopedCourseIds),
+    supabaseAdmin
+      .from('trainee_daily_module_tracking')
+      .select('trainee_id, course_id, module_id, status, updated_at')
+      .in('trainee_id', traineeIds)
+      .in('course_id', scopedCourseIds),
+    supabaseAdmin
+      .from('assessments')
+      .select('id, course_id, module_id, passing_score')
+      .in('course_id', scopedCourseIds),
     supabaseAdmin
       .from('assessment_attempts')
-      .select('trainee_id, score, status')
+      .select('trainee_id, assessment_id, score, status, passed, submitted_at')
       .in('trainee_id', traineeIds),
     supabaseAdmin
       .from('attendance')
-      .select('trainee_id, status')
-      .in('trainee_id', traineeIds),
+      .select('trainee_id, course_id, status, updated_at')
+      .in('trainee_id', traineeIds)
+      .in('course_id', scopedCourseIds),
+    supabaseAdmin
+      .from('grades')
+      .select('trainee_id, course_id, final_score, module_score, practical_score, status, updated_at')
+      .in('trainee_id', traineeIds)
+      .in('course_id', scopedCourseIds),
   ]);
 
-  const profiles = profilesRes.data || [];
+  const profileMap = new Map<string, any>((profilesRes.data || []).map((p: any) => [p.id, p]));
   const metaMap = new Map<string, any>((traineesMetaRes.data || []).map((t: any) => [t.profile_id, t]));
-  const coursesMap = new Map((coursesRes.data || []).map((c: any) => [c.id, c.name]));
+  const coursesMap = new Map<string, any>((coursesRes.data || []).map((c: any) => [c.id, c]));
 
   const courseModuleCountMap = new Map<string, number>();
   (modulesRes.data || []).forEach((m: any) => {
     courseModuleCountMap.set(m.course_id, (courseModuleCountMap.get(m.course_id) || 0) + 1);
   });
 
-  const attemptsByTrainee = new Map<string, any[]>();
-  (attemptsRes.data || []).forEach((att: any) => {
-    const list = attemptsByTrainee.get(att.trainee_id) || [];
-    list.push(att);
-    attemptsByTrainee.set(att.trainee_id, list);
-  });
+  const assessmentMap = new Map<string, any>((assessmentsRes.data || []).map((a: any) => [a.id, a]));
 
-  const attendanceByTrainee = new Map<string, any[]>();
-  (attRecordsRes.data || []).forEach((a: any) => {
-    const list = attendanceByTrainee.get(a.trainee_id) || [];
-    list.push(a);
-    attendanceByTrainee.set(a.trainee_id, list);
-  });
+  // Calculate telemetry for each (trainee, assigned course) enrollment
+  const progressList = enrolledList.map((enr: any, idx: number) => {
+    const p = profileMap.get(enr.trainee_id) || {};
+    const meta = metaMap.get(enr.trainee_id) || {};
+    const courseId = enr.course_id;
+    const courseObj = coursesMap.get(courseId) || (enr.courses as any) || {};
+    const courseTitle = courseObj.name || 'Maritime Training Course';
+    const courseCode = courseObj.code || 'STCW';
+    const isFullModular = isInHouseModularCourse(courseObj.category, courseObj.practical_days);
+    const totalModules = courseModuleCountMap.get(courseId) || 3;
 
-  // Calculate telemetry for each trainee in memory
-  const progressList = profiles.map((p: any, idx: number) => {
-    const meta = metaMap.get(p.id);
-    const traineeEnrollment = enrolledList.find((e: any) => e.trainee_id === p.id);
-    const courseId = traineeEnrollment?.course_id || courseIds[0] || '';
-    const courseTitle = coursesMap.get(courseId) || (traineeEnrollment?.courses as any)?.name || 'Basic Safety Training (BST)';
-    const totalModules = courseModuleCountMap.get(courseId) || 5;
+    // 1. Completed modules for this trainee & course
+    const completedModIds = new Set<string>();
+    let latestActivityIso: string =
+      enr.enrolled_at || enr.created_at || p.updated_at || new Date().toISOString();
 
-    const attemptsList = attemptsByTrainee.get(p.id) || [];
+    for (const dt of dailyTrackingRes.data || []) {
+      if (dt.trainee_id === enr.trainee_id && dt.course_id === courseId) {
+        if (dt.status === 'COMPLETED' && dt.module_id) {
+          completedModIds.add(String(dt.module_id));
+        }
+        if (dt.updated_at && dt.updated_at > latestActivityIso) {
+          latestActivityIso = dt.updated_at;
+        }
+      }
+    }
+
+    for (const lc of lessonCompsRes.data || []) {
+      if (lc.trainee_id === enr.trainee_id && lc.course_id === courseId) {
+        if (lc.module_id) completedModIds.add(String(lc.module_id));
+        else if (lc.lesson_id) completedModIds.add(String(lc.lesson_id));
+        if (lc.completed_at && lc.completed_at > latestActivityIso) {
+          latestActivityIso = lc.completed_at;
+        }
+      }
+    }
+
+    // 2. Assessment attempts strictly for this course
+    const courseAttempts: any[] = [];
+    let postTestPassed = false;
+    for (const att of attemptsRes.data || []) {
+      if (att.trainee_id !== enr.trainee_id) continue;
+      if (
+        Number(att.score) === 0 &&
+        att.status === 'FAILED' &&
+        String(att.submitted_at || '').includes('59:59')
+      ) {
+        continue;
+      }
+      const asm = assessmentMap.get(att.assessment_id);
+      if (!asm || asm.course_id !== courseId) continue;
+      courseAttempts.push(att);
+      const passBenchmark = Number(asm.passing_score) || 75;
+      const isPassed = att.passed === true || att.status === 'PASSED' || Number(att.score) >= passBenchmark;
+      if (isPassed && asm.module_id) {
+        completedModIds.add(String(asm.module_id));
+      }
+      if (isPassed && !asm.module_id) {
+        postTestPassed = true;
+      }
+      if (att.submitted_at && att.submitted_at > latestActivityIso) {
+        latestActivityIso = att.submitted_at;
+      }
+    }
+
+    const gradeRow = (gradesRes.data || []).find(
+      (g: any) => g.trainee_id === enr.trainee_id && g.course_id === courseId
+    );
+
     const avgGrade =
-      attemptsList.length > 0
-        ? Math.round(attemptsList.reduce((acc: number, a: any) => acc + (a.score || 0), 0) / attemptsList.length)
+      courseAttempts.length > 0
+        ? Math.round(
+            courseAttempts.reduce((acc: number, a: any) => acc + (Number(a.score) || 0), 0) /
+              courseAttempts.length
+          )
+        : gradeRow?.final_score != null
+        ? Math.round(Number(gradeRow.final_score))
         : 0;
 
-    const attList = (attendanceByTrainee.get(p.id) || []).filter((a: any) => a.status && a.status !== 'NOT_MARKED');
-    const presentCount = attList.filter((a: any) => ['PRESENT', 'LATE', 'EXCUSED'].includes((a.status || '').toUpperCase())).length;
-    const attendancePercent = attList.length > 0 ? Math.round((presentCount / attList.length) * 100) : 0;
+    // 3. Attendance (only for Modular + Practical courses)
+    const attList = isFullModular
+      ? []
+      : (attRecordsRes.data || []).filter(
+          (a: any) =>
+            a.trainee_id === enr.trainee_id &&
+            a.course_id === courseId &&
+            a.status &&
+            a.status !== 'NOT_MARKED'
+        );
+    const presentCount = attList.filter((a: any) =>
+      ['PRESENT', 'LATE', 'EXCUSED'].includes((a.status || '').toUpperCase())
+    ).length;
+    const attendancePercent =
+      attList.length > 0 ? Math.round((presentCount / attList.length) * 100) : 0;
 
-    const modulesCompleted = attList.length > 0 ? Math.min(totalModules, Math.round(totalModules * (attendancePercent / 100))) : 0;
-    const progressPercent = totalModules > 0 ? Math.round((modulesCompleted / totalModules) * 100) : 0;
+    const isEnrCompleted = (enr.status || '').toUpperCase() === 'COMPLETED';
+    const modulesCompleted = isEnrCompleted
+      ? totalModules
+      : Math.min(totalModules, completedModIds.size);
+
+    let progressPercent = 0;
+    if (isEnrCompleted || (modulesCompleted >= totalModules && postTestPassed && isFullModular)) {
+      progressPercent = 100;
+    } else if (isFullModular) {
+      const modPct = totalModules > 0 ? Math.round((modulesCompleted / totalModules) * 85) : 0;
+      progressPercent = Math.min(100, modPct + (postTestPassed ? 15 : 0));
+    } else {
+      const modPct = totalModules > 0 ? Math.round((modulesCompleted / totalModules) * 60) : 0;
+      const postPct = postTestPassed ? 15 : 0;
+      const pracPct = attList.length > 0 ? Math.round((attendancePercent / 100) * 25) : 0;
+      progressPercent = Math.min(100, modPct + postPct + pracPct);
+    }
 
     let status = 'ON_TRACK';
-    if (progressPercent >= 100 && avgGrade >= 80) {
+    if (progressPercent >= 100 && (avgGrade >= 75 || isEnrCompleted)) {
       status = 'COMPLETED';
-    } else if ((attList.length > 0 && attendancePercent < 80) || (attemptsList.length > 0 && avgGrade < 75)) {
+    } else if (
+      (!isFullModular && attList.length > 0 && attendancePercent < 80) ||
+      (courseAttempts.length > 0 && avgGrade < 75)
+    ) {
       status = 'AT_RISK';
     }
 
     return {
-      id: `prog-${p.id}-${idx}`,
-      traineeId: p.id,
+      id: `prog-${enr.trainee_id}-${courseId}-${idx}`,
+      traineeId: enr.trainee_id,
       traineeName: `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Trainee Seafarer',
       traineeAvatarUrl: p.avatar_url || null,
-      srn: meta?.trainee_number || 'SRN-2026-0000',
+      srn: meta?.srn || meta?.trainee_number || 'SRN-2026-0000',
       rank: meta?.gender || 'Maritime Cadet',
+      courseId,
+      courseCode,
       courseTitle,
+      isFullModular,
+      deliveryMode: isFullModular ? 'FULL_MODULAR' : 'MODULAR_AND_PRACTICAL',
+      requiresPractical: !isFullModular,
       progressPercent,
       modulesCompleted,
       totalModules,
-      attendanceRate: `${attendancePercent}%`,
+      attendanceRate: isFullModular ? 'Full Modular' : `${attendancePercent}%`,
       averageGrade: avgGrade,
       status,
+      enrollmentStatus: (enr.status || 'ACTIVE').toUpperCase(),
+      lastActiveAt: latestActivityIso,
     };
   });
 

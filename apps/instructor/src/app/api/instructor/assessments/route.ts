@@ -10,8 +10,9 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const search = searchParams.get('search')?.toLowerCase() || '';
     const type = searchParams.get('type') || 'ALL';
+    const courseId = searchParams.get('courseId') || 'ALL';
 
-    const assessments = await getInstructorAssessmentsList(instructorId, { search, type });
+    const assessments = await getInstructorAssessmentsList(instructorId, { search, type, courseId });
 
     return NextResponse.json({ success: true, data: assessments });
   } catch (error) {

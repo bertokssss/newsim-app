@@ -37,6 +37,7 @@ export async function GET(request: NextRequest) {
       { data, error },
       { data: enrollments },
       { data: approvedLeaves },
+      { data: modularAssignments },
     ] = await Promise.all([
       query.order('start_at', { ascending: true }),
       supabaseAdmin
@@ -47,6 +48,12 @@ export async function GET(request: NextRequest) {
         .from('instructor_leaves')
         .select('instructor_id, start_date, end_date, leave_type, reason')
         .eq('status', 'APPROVED'),
+      supabaseAdmin
+        .from('course_instructors')
+        .select(
+          'course_id, instructor_id, assigned_at, courses(id, code, name, category, duration_hours, theory_days, practical_days, capacity, training_center_id, training_centers(id, name)), instructors(profile_id, profiles(first_name, last_name, avatar_url))'
+        )
+        .order('assigned_at', { ascending: false }),
     ]);
 
     if (error) throw error;
@@ -106,6 +113,70 @@ export async function GET(request: NextRequest) {
       });
     });
 
+    // Include assigned Full Modular / In-House courses (Academic Record Review — no practical training date)
+    const statusUpper = status.toUpperCase();
+    if (!date && (statusUpper === 'ALL' || statusUpper === 'SCHEDULED' || statusUpper === 'ONGOING')) {
+      const seenModularCourseIds = new Set<string>();
+      for (const ci of modularAssignments || []) {
+        const cObj = Array.isArray(ci.courses) ? ci.courses[0] : ci.courses;
+        if (!cObj || !isFullModularCourseRow(cObj)) continue;
+        if (ctx.centerId && cObj.training_center_id && cObj.training_center_id !== ctx.centerId) continue;
+        if (instructorId !== 'ALL' && ci.instructor_id !== instructorId) continue;
+        if (seenModularCourseIds.has(ci.course_id)) continue;
+        seenModularCourseIds.add(ci.course_id);
+
+        const insRel = Array.isArray(ci.instructors) ? ci.instructors[0] : ci.instructors;
+        const profRel = Array.isArray(insRel?.profiles) ? insRel.profiles[0] : insRel?.profiles;
+        const insName = profRel
+          ? `Capt. ${profRel.first_name || ''} ${profRel.last_name || ''}`.trim()
+          : 'Assigned Reviewer';
+        const centerRel = Array.isArray(cObj.training_centers)
+          ? cObj.training_centers[0]
+          : cObj.training_centers;
+
+        const actualCount = countMap.get(ci.course_id) || 0;
+        const effectiveCap = Math.min(cObj.capacity || 24, 24);
+        const theoryDays = Math.min(3, Math.max(1, Number(cObj.theory_days || 3)));
+
+        schedules.unshift({
+          id: `modular:${ci.course_id}:${ci.instructor_id}`,
+          sessionCode: `${cObj.code || 'MOD'}-MODULAR`,
+          courseId: ci.course_id,
+          courseCode: cObj.code || 'MOD',
+          courseTitle: cObj.name || 'Full Modular Course',
+          category: cObj.category || 'In-House Courses',
+          isFullModular: true,
+          deliveryMode: 'FULL_MODULAR',
+          instructorId: ci.instructor_id,
+          instructorName: insName,
+          instructorAvatarUrl: profRel?.avatar_url || null,
+          substituteInstructorId: null,
+          substituteInstructorName: '',
+          substituteInstructorAvatarUrl: null,
+          instructorOnLeave: false,
+          leaveDetails: null,
+          centerId: cObj.training_center_id || ctx.centerId || null,
+          centerName: centerRel?.name || 'NEWSIM Online Modular LMS',
+          room: 'Online Modular Portal (No Physical Room)',
+          date: '',
+          startDate: '',
+          endDate: '',
+          startTime: 'Self-Paced (Max 3 Days)',
+          endTime: 'No Practical Date',
+          startAt: ci.assigned_at || null,
+          endAt: null,
+          durationHours: Number(cObj.duration_hours || 24),
+          theoryDays,
+          practicalDays: 0,
+          totalDays: theoryDays,
+          capacity: effectiveCap,
+          enrolledCount: Math.min(actualCount, effectiveCap),
+          status: statusUpper === 'ONGOING' ? 'ONGOING' : 'SCHEDULED',
+          isCompleted: false,
+        } as any);
+      }
+    }
+
     if (date) {
       schedules = schedules.filter((s: any) => s.date === date);
     }
@@ -151,6 +222,11 @@ export async function POST(request: NextRequest) {
     if (isFullModular) {
       if (cleanInstructorId) {
         try {
+          await supabaseAdmin
+            .from('course_instructors')
+            .delete()
+            .eq('course_id', courseId);
+
           await supabaseAdmin
             .from('course_instructors')
             .upsert(
@@ -420,6 +496,11 @@ export async function POST(request: NextRequest) {
     // 1. Link course to instructor in course_instructors mapping and batches
     if (cleanInstructorId) {
       try {
+        await supabaseAdmin
+          .from('course_instructors')
+          .delete()
+          .eq('course_id', courseId);
+
         await supabaseAdmin
           .from('course_instructors')
           .upsert(

@@ -38,6 +38,30 @@ export async function POST(
       );
     }
 
+    if (scheduleId.startsWith('modular:')) {
+      const parts = scheduleId.split(':');
+      const courseId = parts[1];
+      if (courseId) {
+        await supabaseAdmin.from('course_instructors').delete().eq('course_id', courseId);
+        await supabaseAdmin.from('course_instructors').upsert(
+          {
+            course_id: courseId,
+            instructor_id: substituteInstructorId,
+            assigned_at: new Date().toISOString(),
+          },
+          { onConflict: 'course_id,instructor_id' }
+        );
+        await supabaseAdmin
+          .from('batches')
+          .update({ instructor_id: substituteInstructorId, updated_at: new Date().toISOString() })
+          .eq('course_id', courseId);
+      }
+      return NextResponse.json({
+        success: true,
+        message: 'Academic Record Reviewer reassigned for Full Modular course.',
+      });
+    }
+
     // Check schedule exists
     const { data: schedule, error: schedErr } = await supabaseAdmin
       .from('schedules')

@@ -4261,29 +4261,31 @@ export async function submitTraineeAssessment(
       : 75;
     const prevPassed = prev.passed ?? (prev.status === 'PASSED' || prevScore >= exactPassingScore);
 
-    // Also fetch past answers for review
-    const { data: pastAnswers } = await supabaseAdmin
-      .from('assessment_answers')
-      .select('question_id, selected_choice_id, is_correct, points_earned')
-      .eq('attempt_id', prev.id);
+    if (prevPassed) {
+      // Also fetch past answers for review
+      const { data: pastAnswers } = await supabaseAdmin
+        .from('assessment_answers')
+        .select('question_id, selected_choice_id, is_correct, points_earned')
+        .eq('attempt_id', prev.id);
 
-    const answersMap: Record<string, string> = {};
-    (pastAnswers || []).forEach((pa: any) => {
-      if (pa.question_id && pa.selected_choice_id) {
-        answersMap[pa.question_id] = pa.selected_choice_id;
-      }
-    });
+      const answersMap: Record<string, string> = {};
+      (pastAnswers || []).forEach((pa: any) => {
+        if (pa.question_id && pa.selected_choice_id) {
+          answersMap[pa.question_id] = pa.selected_choice_id;
+        }
+      });
 
-    return {
-      attemptId: prev.id,
-      score: prevScore,
-      passed: prevPassed,
-      passingScore: exactPassingScore,
-      isPostTest: !assessment?.module_id,
-      alreadyAttempted: true,
-      feedback: `Only 1 attempt is allowed under STCW guidelines. Your attempt was recorded with a score of ${prevScore}%.`,
-      answers: answersMap,
-    };
+      return {
+        attemptId: prev.id,
+        score: prevScore,
+        passed: prevPassed,
+        passingScore: exactPassingScore,
+        isPostTest: !assessment?.module_id,
+        alreadyAttempted: true,
+        feedback: `You have already passed this assessment with a score of ${prevScore}%.`,
+        answers: answersMap,
+      };
+    }
   }
 
   // Lock enforcement: daily pacing + module read + post-test completion requirements
@@ -4462,10 +4464,10 @@ export async function submitTraineeAssessment(
       await supabaseAdmin
         .from('trainee_daily_module_tracking')
         .update({
-          status: isPassed ? 'COMPLETED' : 'FAILED',
+          status: isPassed ? 'COMPLETED' : 'UNLOCKED',
           completed_at: isPassed ? new Date().toISOString() : null,
-          failed_at: !isPassed ? new Date().toISOString() : null,
-          failure_reason: !isPassed ? `Failed module assessment (scored ${score}%, minimum ${passingScore}% required)` : null,
+          failed_at: null,
+          failure_reason: !isPassed ? `Scored ${score}% (minimum ${passingScore}% required — retry available before deadline)` : null,
           updated_at: new Date().toISOString(),
         })
         .eq('trainee_id', resolvedId)
