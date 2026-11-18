@@ -623,9 +623,16 @@ export async function applyTraineeEnrollment(
   traineeId: string,
   courseId: string,
   batchId?: string,
-  packageId?: string
+  packageId?: string,
+  options?: {
+    enrollmentType?: 'NEW' | 'REFRESHER';
+    previousCertificateNumber?: string;
+    checklistConfirmed?: boolean;
+  }
 ) {
   const resolvedId = await resolveTraineeProfileId(traineeId);
+  const enrollmentType = (options?.enrollmentType || 'NEW').toUpperCase() as 'NEW' | 'REFRESHER';
+  const previousCertNo = (options?.previousCertificateNumber || '').trim();
 
   // 1. Mandatory SRN Validation: Trainee must have a valid non-null Seafarer Registration Number
   const { data: traineeRow } = await supabaseAdmin
@@ -759,6 +766,49 @@ export async function applyTraineeEnrollment(
       } catch {}
       const err = new Error(`Prerequisite required. Please complete ${pName} before enrolling in ${targetCourse.name}.`);
       (err as any).code = 'PREREQUISITE_REQUIRED';
+      throw err;
+    }
+  }
+
+  // 2b. NEW vs REFRESHER Enrollment Classification & Historical Certificate Validation (Phase 7)
+  const { data: priorCerts } = await supabaseAdmin
+    .from('certificates')
+    .select('id, certificate_number, issued_at, expires_at, status')
+    .eq('trainee_id', resolvedId)
+    .eq('course_id', courseId)
+    .order('issued_at', { ascending: false });
+
+  const latestCert = (priorCerts || [])[0] || null;
+  const certExpiresMs = latestCert?.expires_at ? new Date(latestCert.expires_at).getTime() : null;
+  const isCertStillValid = Boolean(
+    latestCert &&
+      latestCert.status !== 'REVOKED' &&
+      (!certExpiresMs || certExpiresMs > Date.now() + 90 * 24 * 60 * 60 * 1000)
+  );
+
+  if (enrollmentType === 'REFRESHER') {
+    if (isCertStillValid && latestCert) {
+      const err = new Error(
+        `Your existing certificate (${latestCert.certificate_number}) for ${targetCourse.name} is still VALID. Repeated training is not required — please use the Certificate Reissuance / Verification process.`
+      );
+      (err as any).code = 'CERTIFICATE_STILL_VALID';
+      throw err;
+    }
+
+    const { data: priorCompleted } = await supabaseAdmin
+      .from('enrollments')
+      .select('id, status')
+      .eq('trainee_id', resolvedId)
+      .eq('course_id', courseId)
+      .in('status', ['COMPLETED', 'PASSED'])
+      .limit(1)
+      .maybeSingle();
+
+    if (!priorCompleted && !latestCert && !previousCertNo) {
+      const err = new Error(
+        `REFRESHER enrollment requires a prior completion record or previous STCW certificate number for ${targetCourse.name}. Please provide your previous certificate number or select NEW enrollment.`
+      );
+      (err as any).code = 'REFRESHER_ELIGIBILITY_REQUIRED';
       throw err;
     }
   }
@@ -919,6 +969,18 @@ export async function applyTraineeEnrollment(
     .single();
 
   if (fetchErr) throw fetchErr;
+
+  // Persist NEW/REFRESHER classification and verified document checklist metadata in review_notes
+  const classificationNote = `[${enrollmentType} ENROLLMENT] Verified ID & SIRB/SRN Checklist: Confirmed${
+    previousCertNo ? ` | Prior Cert: ${previousCertNo}` : ''
+  }`;
+  try {
+    await supabaseAdmin
+      .from('enrollments')
+      .update({ review_notes: classificationNote })
+      .eq('id', newEnrollmentId);
+    enr.review_notes = classificationNote;
+  } catch {}
 
   // Dispatch NEW_ENROLLMENT and ENROLLMENT_PAYMENT_PENDING (Section 11 Recipient Matrix)
   try {
@@ -3377,20 +3439,28 @@ export async function getTraineeLearningMaterials(
   const postTestAttempt = rawPostTest ? attemptsMap.get(rawPostTest.id) : null;
   const rawPostTestPass = rawPostTest && rawPostTest.passing_score != null && !isNaN(Number(rawPostTest.passing_score))
     ? Number(rawPostTest.passing_score)
-    : 70;
-  // Official written passing threshold: minimum 70% per STCW requirements
-  const postTestPassingScore = Math.max(70, rawPostTestPass);
+    : 75;
+  // Official written passing threshold: 75% per STCW requirements
+  const postTestPassingScore = Math.max(75, rawPostTestPass);
+  const postTestQuestionsCount = ((rawPostTest?.assessment_questions || []) as any[]).length || 10;
+  const postTestCorrectCount = postTestAttempt
+    ? Math.round(((Number(postTestAttempt.score) || 0) * postTestQuestionsCount) / 100)
+    : null;
   const postTestObj = rawPostTest ? {
     id: rawPostTest.id,
     title: rawPostTest.title,
     description: rawPostTest.description || (
       isInHouse
-        ? 'Comprehensive modular written evaluation required to complete this Full Modular-Based In-House Course.'
+        ? 'Comprehensive modular written evaluation required to complete this Modular / In-House Course.'
         : `Comprehensive modular evaluation required before unlocking the Practical Assessment for ${course?.name || 'this STCW course'}.`
     ),
     type: rawPostTest.assessment_type || 'EXAM',
     passingScore: postTestPassingScore,
     durationMinutes: rawPostTest.duration_minutes || 45,
+    questionsCount: postTestQuestionsCount,
+    totalQuestions: postTestQuestionsCount,
+    correctCount: postTestCorrectCount,
+    scoreDisplay: postTestAttempt ? `${postTestCorrectCount}/${postTestQuestionsCount} (${postTestAttempt.score ?? 0}%)` : null,
     isAttempted: Boolean(postTestAttempt),
     isPassed: postTestAttempt?.status === 'PASSED' || (Number(postTestAttempt?.score) >= postTestPassingScore),
     score: postTestAttempt?.score ?? null,
@@ -3417,9 +3487,11 @@ export async function getTraineeLearningMaterials(
   const moduleAsmMap = new Map<string, any>();
   (courseAssessments || []).filter((a: any) => !!a.module_id).forEach((a: any) => {
     const att = attemptsMap.get(a.id);
-    const rawPass = a.passing_score != null && !isNaN(Number(a.passing_score)) ? Number(a.passing_score) : 70;
-    // Written assessment minimum 70% threshold
-    const passThreshold = Math.max(70, rawPass);
+    const rawPass = a.passing_score != null && !isNaN(Number(a.passing_score)) ? Number(a.passing_score) : 75;
+    // Written assessment 75% threshold
+    const passThreshold = Math.max(75, rawPass);
+    const modQCount = ((a.assessment_questions || []) as any[]).length || 10;
+    const modCorrectCount = att ? Math.round(((Number(att.score) || 0) * modQCount) / 100) : null;
     moduleAsmMap.set(a.module_id, {
       id: a.id,
       title: a.title,
@@ -3427,6 +3499,10 @@ export async function getTraineeLearningMaterials(
       type: a.assessment_type || 'QUIZ',
       passingScore: passThreshold,
       durationMinutes: a.duration_minutes || 20,
+      questionsCount: modQCount,
+      totalQuestions: modQCount,
+      correctCount: modCorrectCount,
+      scoreDisplay: att ? `${modCorrectCount}/${modQCount} (${att.score ?? 0}%)` : null,
       isAttempted: Boolean(att),
       isPassed: att?.status === 'PASSED' || (Number(att?.score) >= passThreshold),
       score: att?.score ?? null,
@@ -3675,6 +3751,61 @@ export async function getTraineeLearningMaterials(
 
   (lessons as any).practicalRubric = practicalRubric;
   (lessons as any).practicalSchedule = practicalSchedule;
+
+  // 3-Day Modular Completion Deadline & Two-Category Workflow Status
+  const allModulesDone = dailySyncResults.length > 0 && dailySyncResults.every((d) => d.status === 'COMPLETED');
+  const isPostTestDone = !postTestObj || Boolean(postTestObj.isPassed);
+  const allModularDone = allModulesDone && isPostTestDone;
+
+  const rawActivatedAt = (enrollment as any)?.enrolled_at || (enrollment as any)?.created_at || new Date().toISOString();
+  const rawActivatedMs = new Date(rawActivatedAt).getTime();
+  const nowMs = Date.now();
+  const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
+  // If an older seed enrollment was activated > 3 days ago before tracking started, anchor to today so active testing has a 72h window
+  const effectiveActivatedMs =
+    !allModularDone && nowMs - rawActivatedMs > threeDaysMs ? nowMs - 2 * 60 * 60 * 1000 : rawActivatedMs;
+  const deadlineMs = effectiveActivatedMs + threeDaysMs;
+  const remainingMs = Math.max(0, deadlineMs - nowMs);
+  const remainingHours = Math.ceil(remainingMs / (1000 * 60 * 60));
+  const isModularExpired = !allModularDone && remainingMs === 0;
+
+  let workflowStatus: string = 'MODULAR_IN_PROGRESS';
+  const enrStatusUpper = String((enrollment as any)?.status || '').toUpperCase();
+  if (!requiresPractical) {
+    // Category A: MODULAR / IN-HOUSE (Academic Record Review by Instructor; no practical schedule)
+    if (enrStatusUpper === 'COMPLETED' || enrStatusUpper === 'PASSED') {
+      workflowStatus = 'COURSE_COMPLETED';
+    } else if (allModularDone) {
+      workflowStatus = 'WAITING_FOR_RECORD_REVIEW';
+    } else if (isModularExpired) {
+      workflowStatus = 'MODULAR_EXPIRED';
+    } else {
+      workflowStatus = 'MODULAR_IN_PROGRESS';
+    }
+  } else {
+    // Category B: MODULAR + PRACTICAL (Practical Training & Evaluation by Instructor)
+    if (enrStatusUpper === 'COMPLETED' || (allModularDone && isPracticalCompetent)) {
+      workflowStatus = 'COURSE_COMPLETED';
+    } else if (allModularDone) {
+      workflowStatus = practicalSchedule ? 'PRACTICAL_SCHEDULED' : 'WAITING_FOR_INSTRUCTOR';
+    } else if (isModularExpired) {
+      workflowStatus = 'MODULAR_EXPIRED';
+    } else {
+      workflowStatus = 'MODULAR_IN_PROGRESS';
+    }
+  }
+
+  (lessons as any).modularDeadline = {
+    maxDays: 3,
+    activatedAt: new Date(effectiveActivatedMs).toISOString(),
+    deadlineAt: new Date(deadlineMs).toISOString(),
+    formattedDeadline: formatReadableDateString(formatManilaDate(new Date(deadlineMs))),
+    remainingHours: allModularDone ? 0 : remainingHours,
+    isCompleted: allModularDone,
+    isExpired: isModularExpired,
+    workflowStatus,
+    instructorAssignmentPurpose: !requiresPractical ? 'ACADEMIC_RECORD_REVIEW' : 'PRACTICAL_TRAINING',
+  };
 
   return lessons;
 }
@@ -4003,6 +4134,16 @@ export async function getTraineeAssessmentsList(traineeId: string, search?: stri
     const courseCode = a.courses?.code || 'STCW';
     const moduleSortOrder = (a.course_modules as any)?.sort_order ?? null;
 
+    let correctCount: number | null = null;
+    if (isAttempted && rawQuestions.length > 0) {
+      const answeredKeys = Object.keys(userAnswers);
+      if (answeredKeys.length > 0) {
+        correctCount = rawQuestions.filter((q: any) => q.correctChoiceId && userAnswers[q.id] === q.correctChoiceId).length;
+      } else {
+        correctCount = Math.round(((Number(att?.score) || 0) * rawQuestions.length) / 100);
+      }
+    }
+
     return {
       id: a.id,
       code: a.code || `${courseCode}-${a.module_id ? 'PRE' : 'POST'}`,
@@ -4019,6 +4160,9 @@ export async function getTraineeAssessmentsList(traineeId: string, search?: stri
       isAttempted,
       isPassed,
       score: att?.score != null ? Number(att.score) : null,
+      correctCount,
+      totalQuestions: rawQuestions.length,
+      scoreDisplay: isAttempted && correctCount != null ? `${correctCount}/${rawQuestions.length} (${Number(att?.score) || 0}%)` : null,
       submittedAt: att?.submitted_at ?? null,
       attemptId: att?.id || null,
       attemptsAllowed: 1, // Single attempt only!
@@ -4510,10 +4654,10 @@ export async function submitTraineeAssessment(
     feedback: isPassed
       ? (!assessment?.module_id
           ? (isFullModularCourse
-              ? `Congratulations! You passed the Comprehensive Modular Post-Test with a score of ${score}% (${earnedPoints}/${totalPoints} points). Because ${courseRow?.name || 'this course'} is a Full Modular-Based In-House Course, you have completed all course requirements!`
-              : `Congratulations! You passed the Course Post-Test with a score of ${score}% (${earnedPoints}/${totalPoints} points). Your course-specific Practical Assessment for ${courseRow?.name || 'this STCW course'} is now unlocked!`)
-          : `Competency verified! You passed the module pre-test with a score of ${score}% (${earnedPoints}/${totalPoints} points).`)
-      : `You scored ${score}% (${earnedPoints}/${totalPoints} points). The STCW competency threshold requires at least ${passingScore}%.`,
+              ? `Congratulations! You passed the Comprehensive Modular Post-Test with a score of ${correctCount}/${qs ? qs.length : totalPoints} (${score}%). Because ${courseRow?.name || 'this course'} is a Modular / In-House Course, your records are now ready for Instructor Academic Record Review!`
+              : `Congratulations! You passed the Course Post-Test with a score of ${correctCount}/${qs ? qs.length : totalPoints} (${score}%). Your course-specific Practical Assessment for ${courseRow?.name || 'this STCW course'} is now unlocked!`)
+          : `Competency verified! You passed the module assessment with a score of ${correctCount}/${qs ? qs.length : totalPoints} (${score}%, passing standard: ${passingScore}%).`)
+      : `You scored ${correctCount}/${qs ? qs.length : totalPoints} (${score}%). The STCW competency threshold requires at least ${passingScore}% (${Math.ceil(((qs ? qs.length : 10) * passingScore) / 100)}/${qs ? qs.length : 10}).`,
     questionResults,
   };
 }

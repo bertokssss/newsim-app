@@ -45,6 +45,7 @@ export default function LearningClient() {
   const [requiresPractical, setRequiresPractical] = useState<boolean>(true);
   const [practicalRubric, setPracticalRubric] = useState<any | null>(null);
   const [practicalSchedule, setPracticalSchedule] = useState<any | null>(null);
+  const [modularDeadline, setModularDeadline] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
   const [completing, setCompleting] = useState(false);
   const [completedSuccess, setCompletedSuccess] = useState(false);
@@ -78,6 +79,7 @@ export default function LearningClient() {
         }
         setPracticalRubric(json.practicalRubric || null);
         setPracticalSchedule(json.practicalSchedule || null);
+        setModularDeadline(json.modularDeadline || null);
         setPracticalOpen(false);
         setPostTestOpen(false);
         if (initialLessonId) {
@@ -229,14 +231,26 @@ export default function LearningClient() {
               !requiresPractical ? 'text-indigo-900 dark:text-indigo-200' : 'text-sky-900 dark:text-sky-200'
             }`}>
               {!requiresPractical
-                ? 'In-House Course • Full Modular-Based Curriculum (100% Modular)'
-                : `Safety and Other STCW Courses • Modular Lessons First, Then Practical in ${activeLesson?.courseCode || 'Enrolled Course'}`}
+                ? 'Category A: MODULAR / IN-HOUSE • 3-Day Modular Completion Window (Academic Record Review)'
+                : `Category B: MODULAR + PRACTICAL • 3-Day Modular Window, Then Practical in ${activeLesson?.courseCode || 'Enrolled Course'}`}
             </span>
             <p className="text-slate-600 dark:text-slate-300 text-[11px] mt-0.5">
               {!requiresPractical
-                ? 'This In-House course is 100% modular. Complete each modular lesson and pass all written assessments to achieve 100% course completion and certificate qualification (no practical simulator session required).'
-                : `Complete your modular lessons first (1 module per day). Once all modules for ${activeLesson?.courseTitle || 'this course'} are completed, the Practical Assessment specific to ${activeLesson?.courseCode || 'this course'} unlocks right after the modules.`}
+                ? 'Complete lessons & assessments within 3 days (can finish in 1, 2, or 3 days). No practical schedule or physical attendance required — an assigned instructor reviews and validates your academic record.'
+                : `Complete modular lessons & assessments within 3 days (can finish in 1, 2, or 3 days). After modular completion, status transitions to WAITING_FOR_INSTRUCTOR for your scheduled Practical Training in ${activeLesson?.courseCode || 'this course'}.`}
             </p>
+            {modularDeadline && (
+              <div className="flex flex-wrap items-center gap-2 mt-2">
+                <span className="px-2 py-0.5 rounded-md bg-white/80 dark:bg-slate-900/70 border border-slate-200 dark:border-slate-700 font-mono text-[10px] font-bold text-slate-700 dark:text-slate-200">
+                  Workflow: {modularDeadline.workflowStatus}
+                </span>
+                <span className="px-2 py-0.5 rounded-md bg-white/80 dark:bg-slate-900/70 border border-slate-200 dark:border-slate-700 font-mono text-[10px] text-slate-600 dark:text-slate-300">
+                  {modularDeadline.isCompleted
+                    ? '✓ Modular Requirements Completed (Countdown Stopped)'
+                    : `3-Day Modular Deadline: ${modularDeadline.formattedDeadline} (${modularDeadline.remainingHours}h remaining)`}
+                </span>
+              </div>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -1047,7 +1061,7 @@ export default function LearningClient() {
                               {activeLesson.moduleAssessment.title || 'Module Competency Pre-Test'}
                             </h3>
                             <p className="text-[11px] font-mono text-slate-500">
-                              Passing threshold: {activeLesson.moduleAssessment.passingScore}% • 1 Single Attempt Allowed
+                              Total Questions: {activeLesson.moduleAssessment.questionsCount || activeLesson.moduleAssessment.questions?.length || 10} • Passing Score: {activeLesson.moduleAssessment.passingScore || 75}% • 1 Attempt Allowed
                             </p>
                           </div>
                         </div>
@@ -1055,7 +1069,9 @@ export default function LearningClient() {
                         {activeLesson.moduleAssessment.isAttempted ? (
                           <span className="px-3 py-1 rounded-full text-xs font-mono font-bold bg-emerald-500/15 text-emerald-600 border border-emerald-500/30 flex items-center gap-1 self-start sm:self-auto">
                             <CheckCircle className="w-3.5 h-3.5" />
-                            <span>Attempt Recorded ({activeLesson.moduleAssessment.score ?? 0}%)</span>
+                            <span>
+                              Score: {activeLesson.moduleAssessment.scoreDisplay || `${Math.round(((activeLesson.moduleAssessment.score ?? 0) * (activeLesson.moduleAssessment.questionsCount || 10)) / 100)}/${activeLesson.moduleAssessment.questionsCount || 10} (${activeLesson.moduleAssessment.score ?? 0}%)`}
+                            </span>
                           </span>
                         ) : (
                           <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 self-start sm:self-auto">

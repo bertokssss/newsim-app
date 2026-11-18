@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@newsim/database';
+import { supabaseAdmin, ensureDefaultAssessmentQuestions } from '@newsim/database';
 import {
   ASSESSMENT_SELECT,
   formatAssessment,
@@ -114,6 +114,12 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (error) throw error;
+
+    try {
+      await ensureDefaultAssessmentQuestions(data.id, data.title, 10);
+    } catch (seedErr) {
+      console.warn('Could not seed default 10 questions for new assessment:', seedErr);
+    }
 
     await writeAdminAudit({
       actorId: ctx.user.id,

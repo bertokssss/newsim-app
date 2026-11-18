@@ -62,6 +62,9 @@ type Assessment = {
   isAttempted: boolean;
   isPassed: boolean;
   score: number | null;
+  correctCount?: number | null;
+  totalQuestions?: number;
+  scoreDisplay?: string | null;
   submittedAt: string | null;
   attemptId: string | null;
   questionsCount: number;
@@ -319,22 +322,33 @@ export default function AssessmentsClient() {
                 const isPostTest = !asm.moduleId;
                 const isHighlighted = asm.id === paramAssessmentId;
 
+                const totalQ = asm.totalQuestions || asm.questionsCount || 10;
+                const correctQ =
+                  asm.correctCount != null
+                    ? asm.correctCount
+                    : asm.isAttempted
+                    ? Math.round(((asm.score ?? 0) * totalQ) / 100)
+                    : null;
+                const minPassQ = Math.ceil((totalQ * (asm.passingScore || 75)) / 100);
+
                 let badgeText = 'READY • 1 ATTEMPT';
                 let badgeClass = 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30';
-                if (asm.isFailed) {
-                  badgeText = 'FAILED • DEADLINE MISSED';
-                  badgeClass = 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30';
-                } else if (asm.isDueToday && !asm.isAttempted) {
-                  badgeText = 'DUE TODAY • 1 ATTEMPT';
-                  badgeClass = 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/40 animate-pulse';
-                } else if (asm.isLocked) {
-                  badgeText = asm.dayNumber ? `LOCKED • DAY ${asm.dayNumber}` : 'LOCKED';
-                  badgeClass = 'bg-slate-500/15 text-slate-500 dark:text-slate-400 border border-slate-500/20';
-                } else if (asm.isAttempted) {
-                  badgeText = asm.isPassed ? `PASSED • ${asm.score ?? 0}%` : `FAILED • ${asm.score ?? 0}%`;
+                if (asm.isAttempted) {
+                  badgeText = asm.isPassed
+                    ? `PASSED • ${correctQ}/${totalQ} (${asm.score ?? 0}%)`
+                    : `FAILED • ${correctQ}/${totalQ} (${asm.score ?? 0}%)`;
                   badgeClass = asm.isPassed
                     ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
                     : 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/20';
+                } else if (asm.isFailed) {
+                  badgeText = 'FAILED';
+                  badgeClass = 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30';
+                } else if (asm.isDueToday && !asm.isAttempted) {
+                  badgeText = 'UNLOCKED • 1 ATTEMPT';
+                  badgeClass = 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/40';
+                } else if (asm.isLocked) {
+                  badgeText = asm.dayNumber ? `LOCKED • MODULE ${asm.dayNumber}` : 'LOCKED';
+                  badgeClass = 'bg-slate-500/15 text-slate-500 dark:text-slate-400 border border-slate-500/20';
                 }
 
                 return (
@@ -378,13 +392,23 @@ export default function AssessmentsClient() {
 
                       <div className="space-y-1.5 pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px] font-mono text-slate-600 dark:text-[#CBD5E1]">
                         <div className="flex justify-between">
-                          <span>Questions:</span>
-                          <span className="font-bold text-slate-900 dark:text-[#F8FAFC]">{asm.questionsCount}</span>
+                          <span>Total Questions:</span>
+                          <span className="font-bold text-slate-900 dark:text-[#F8FAFC]">{totalQ} Questions</span>
                         </div>
                         <div className="flex justify-between">
                           <span>Passing Score:</span>
-                          <span className="font-bold text-sky-600 dark:text-sky-400">{asm.passingScore}%</span>
+                          <span className="font-bold text-sky-600 dark:text-sky-400">
+                            {asm.passingScore}% ({minPassQ}/{totalQ})
+                          </span>
                         </div>
+                        {asm.isAttempted && (
+                          <div className="flex justify-between">
+                            <span>Total Score:</span>
+                            <span className={`font-bold ${asm.isPassed ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                              {correctQ}/{totalQ} ({asm.score ?? 0}%)
+                            </span>
+                          </div>
+                        )}
                         <div className="flex justify-between">
                           <span>Time Limit:</span>
                           <span>{asm.durationMinutes} Minutes</span>
@@ -473,7 +497,10 @@ export default function AssessmentsClient() {
                       1 Attempt Only
                     </span>
                     <span className="text-xs font-mono text-slate-500 dark:text-slate-400">
-                      Passing: <strong>{activeExam.passingScore}%</strong>
+                      Questions: <strong>{totalQuestionsCount}</strong>
+                    </span>
+                    <span className="text-xs font-mono text-slate-500 dark:text-slate-400">
+                      Passing: <strong>{activeExam.passingScore}% ({Math.ceil((totalQuestionsCount * activeExam.passingScore) / 100)}/{totalQuestionsCount})</strong>
                     </span>
                     <span className="text-xs font-mono text-slate-500 dark:text-slate-400 flex items-center gap-1">
                       <Clock className="w-3 h-3 text-sky-500" />
@@ -586,10 +613,10 @@ export default function AssessmentsClient() {
                           {submissionResult.passed ? 'Competency Standard Satisfied!' : 'Below Passing Score'}
                         </h3>
                         <div className="text-2xl font-mono font-extrabold text-sky-600 dark:text-sky-400 mt-1">
-                          Score: {submissionResult.score}%
+                          Total Score: {submissionResult.correctCount ?? 0}/{submissionResult.totalQuestions ?? activeExam.questions.length} ({submissionResult.score}%)
                         </div>
                         <p className="text-xs font-mono text-slate-500 mt-0.5">
-                          Passing Standard: {submissionResult.passingScore ?? activeExam.passingScore}%
+                          Passing Standard: {submissionResult.passingScore ?? activeExam.passingScore}% (Min. {Math.ceil(((submissionResult.totalQuestions ?? activeExam.questions.length) * (submissionResult.passingScore ?? activeExam.passingScore)) / 100)}/{submissionResult.totalQuestions ?? activeExam.questions.length} Correct)
                         </p>
                       </div>
 
@@ -600,15 +627,15 @@ export default function AssessmentsClient() {
                       {/* Score metrics breakdown */}
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-w-md mx-auto pt-2">
                         <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 text-center">
-                          <span className="text-[10px] font-mono uppercase text-slate-500 block">Total Questions</span>
+                          <span className="text-[10px] font-mono uppercase text-slate-500 block">Total Score</span>
                           <span className="text-base font-extrabold text-slate-900 dark:text-[#F8FAFC] font-heading">
-                            {submissionResult.totalQuestions ?? activeExam.questions.length}
+                            {submissionResult.correctCount ?? 0}/{submissionResult.totalQuestions ?? activeExam.questions.length}
                           </span>
                         </div>
                         <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 text-center">
-                          <span className="text-[10px] font-mono uppercase text-slate-500 block">Correct Answers</span>
+                          <span className="text-[10px] font-mono uppercase text-slate-500 block">Percentage (75% Pass)</span>
                           <span className="text-base font-extrabold text-emerald-600 dark:text-emerald-400 font-heading">
-                            {submissionResult.correctCount ?? 0}
+                            {submissionResult.score}%
                           </span>
                         </div>
                         <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 text-center col-span-2 sm:col-span-1">

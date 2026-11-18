@@ -29,6 +29,7 @@ export async function GET(req: NextRequest) {
       const deliveryMode = (lessons as any)?.deliveryMode || (requiresPractical ? 'MODULAR_AND_PRACTICAL' : 'FULL_MODULAR');
       const practicalRubric = (lessons as any)?.practicalRubric || null;
       const practicalSchedule = (lessons as any)?.practicalSchedule || null;
+      const modularDeadline = (lessons as any)?.modularDeadline || null;
 
       if (search) {
         lessons = lessons.filter(
@@ -54,6 +55,7 @@ export async function GET(req: NextRequest) {
         deliveryMode,
         practicalRubric,
         practicalSchedule,
+        modularDeadline,
       });
     } catch (subErr: any) {
       if (subErr?.code === 'WAITING_FOR_INSTRUCTOR' || subErr?.message === 'WAITING_FOR_INSTRUCTOR') {

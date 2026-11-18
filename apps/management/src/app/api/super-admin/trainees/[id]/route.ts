@@ -46,32 +46,103 @@ export async function GET(
       return NextResponse.json({ success: false, error: 'Trainee not found' }, { status: 404 });
     }
 
-    const [{ data: enrollments }, { data: attendance }, { data: certificates }, { data: pendingInvite }] =
-      await Promise.all([
-        supabaseAdmin
-          .from('enrollments')
-          .select('id, trainee_id, course_id, package_id, batch_id, training_center_id, status, enrolled_at, completed_at, created_at, trainees(profile_id, profiles(first_name, last_name, email, avatar_url)), courses(code, name), training_centers(name)')
-          .eq('trainee_id', id),
-        supabaseAdmin
-          .from('attendance')
-          .select('*, trainees(profiles(first_name, last_name, avatar_url)), schedules(start_at, room, instructor_id, course_id, courses(name), instructors(profiles(first_name, last_name, avatar_url)))')
-          .eq('trainee_id', id),
-        supabaseAdmin
-          .from('certificates')
-          .select('*, trainees(profiles(first_name, last_name, email, avatar_url)), courses(code, name)')
-          .eq('trainee_id', id),
-        supabaseAdmin
-          .from('invitations')
-          .select('id')
-          .eq('email', trainee.profiles?.email)
-          .eq('status', 'PENDING')
-          .maybeSingle(),
-      ]);
+    const [
+      { data: enrollments },
+      { data: attendance },
+      { data: certificates },
+      { data: grades },
+      { data: attempts },
+      { data: practicalEvals },
+      { data: pendingInvite },
+    ] = await Promise.all([
+      supabaseAdmin
+        .from('enrollments')
+        .select('id, trainee_id, course_id, package_id, batch_id, training_center_id, status, review_notes, enrolled_at, completed_at, created_at, trainees(profile_id, profiles(first_name, last_name, email, avatar_url)), courses(code, name, category), batches(batch_code, start_date, end_date, instructor_id), training_centers(name)')
+        .eq('trainee_id', id)
+        .order('enrolled_at', { ascending: false }),
+      supabaseAdmin
+        .from('attendance')
+        .select('*, trainees(profiles(first_name, last_name, avatar_url)), schedules(start_at, room, instructor_id, course_id, courses(name), instructors(profiles(first_name, last_name, avatar_url)))')
+        .eq('trainee_id', id),
+      supabaseAdmin
+        .from('certificates')
+        .select('*, trainees(profiles(first_name, last_name, email, avatar_url)), courses(code, name, category)')
+        .eq('trainee_id', id)
+        .order('issued_at', { ascending: false }),
+      supabaseAdmin
+        .from('grades')
+        .select('*, courses(code, name, category)')
+        .eq('trainee_id', id)
+        .order('created_at', { ascending: false }),
+      supabaseAdmin
+        .from('assessment_attempts')
+        .select('id, assessment_id, score, status, passed, submitted_at, assessments(id, title, passing_score, course_id, module_id, courses(code, name), assessment_questions(id))')
+        .eq('trainee_id', id)
+        .order('submitted_at', { ascending: false }),
+      supabaseAdmin
+        .from('practical_evaluations')
+        .select('id, course_id, total_score, max_possible_score, percentage, competency_status, status, general_feedback, evaluation_date, courses(code, name)')
+        .eq('trainee_id', id)
+        .order('created_at', { ascending: false }),
+      supabaseAdmin
+        .from('invitations')
+        .select('id')
+        .eq('email', trainee.profiles?.email)
+        .eq('status', 'PENDING')
+        .maybeSingle(),
+    ]);
 
     const formattedTrainee = formatTrainee(trainee);
     if (pendingInvite) {
       formattedTrainee.status = 'PENDING';
     }
+
+    const nowMs = Date.now();
+    const nearExpWindowMs = 90 * 24 * 60 * 60 * 1000;
+    const formattedCertificates = (certificates || []).map((row: any) => {
+      const base = formatCertificate(row);
+      const expMs = row.expires_at ? new Date(row.expires_at).getTime() : null;
+      let validityStatus: 'VALID' | 'NEAR_EXPIRATION' | 'EXPIRED' | 'PENDING_VERIFICATION' | 'NO_EXPIRATION' = 'VALID';
+      if ((row.status || '').toUpperCase() === 'PENDING' || (row.status || '').toUpperCase() === 'PENDING_VERIFICATION') {
+        validityStatus = 'PENDING_VERIFICATION';
+      } else if (!expMs) {
+        validityStatus = 'NO_EXPIRATION';
+      } else if (expMs < nowMs) {
+        validityStatus = 'EXPIRED';
+      } else if (expMs - nowMs <= nearExpWindowMs) {
+        validityStatus = 'NEAR_EXPIRATION';
+      }
+      return {
+        ...base,
+        validityStatus,
+      };
+    });
+
+    const formattedAssessments = (attempts || [])
+      .filter((att: any) => !(Number(att.score) === 0 && att.status === 'FAILED' && String(att.submitted_at || '').includes('59:59')))
+      .map((att: any) => {
+        const asm = att.assessments || {};
+        const totalQuestions = Array.isArray(asm.assessment_questions) ? asm.assessment_questions.length || 10 : 10;
+        const scorePct = Number(att.score) || 0;
+        const correctCount = Math.round((scorePct * totalQuestions) / 100);
+        const passingScore = Number(asm.passing_score) || 75;
+        return {
+          id: att.id,
+          assessmentId: att.assessment_id,
+          title: asm.title || 'Competency Assessment',
+          courseCode: asm.courses?.code || 'STCW',
+          courseTitle: asm.courses?.name || 'Maritime Course',
+          type: asm.module_id ? 'MODULE_QUIZ' : 'POST_TEST',
+          score: scorePct,
+          correctCount,
+          totalQuestions,
+          scoreDisplay: `${correctCount}/${totalQuestions} (${scorePct}%)`,
+          passingScore,
+          passed: Boolean(att.passed ?? scorePct >= passingScore),
+          status: att.status || (scorePct >= passingScore ? 'PASSED' : 'FAILED'),
+          submittedAt: att.submitted_at,
+        };
+      });
 
     return NextResponse.json({
       success: true,
@@ -80,10 +151,40 @@ export async function GET(
         enrollments: (enrollments || []).map((row: any) => {
           const formatted = formatEnrollment(row);
           const { paymentAmount, paymentStatus, rawPaymentStatus, paymongoCheckoutId, paymongoPaymentId, paymentMethod, ...nonFinancial } = formatted as any;
-          return nonFinancial;
+          const cat = row.courses?.category || 'Safety and Other STCW Courses';
+          const isInHouse = String(cat).toLowerCase().includes('in-house') || String(cat).toLowerCase().includes('modular');
+          return {
+            ...nonFinancial,
+            courseCategory: isInHouse ? 'MODULAR / IN-HOUSE' : 'MODULAR + PRACTICAL',
+            instructorPurpose: isInHouse ? 'ACADEMIC_RECORD_REVIEW' : 'PRACTICAL_TRAINING',
+            reviewNotes: row.review_notes || null,
+          };
         }),
         attendance: (attendance || []).map(formatAttendance),
-        certificates: (certificates || []).map(formatCertificate),
+        certificates: formattedCertificates,
+        grades: (grades || []).map((g: any) => ({
+          id: g.id,
+          courseId: g.course_id,
+          courseCode: g.courses?.code || 'STCW',
+          courseTitle: g.courses?.name || 'Maritime Course',
+          finalScore: Number(g.final_score) || 0,
+          moduleScore: Number(g.module_score) || 0,
+          practicalScore: Number(g.practical_score) || 0,
+          attendanceScore: Number(g.attendance_score) || 0,
+          status: g.status || 'IN_PROGRESS',
+          remarks: g.remarks || '',
+          gradedAt: g.graded_at || g.updated_at,
+        })),
+        assessmentAttempts: formattedAssessments,
+        practicalEvaluations: (practicalEvals || []).map((pe: any) => ({
+          id: pe.id,
+          courseCode: pe.courses?.code || 'STCW',
+          courseTitle: pe.courses?.name || 'STCW Course',
+          percentage: Number(pe.percentage) || 0,
+          competencyStatus: pe.competency_status || 'PENDING',
+          feedback: pe.general_feedback || '',
+          evaluatedAt: pe.evaluation_date,
+        })),
       },
     });
   } catch (error) {

@@ -766,7 +766,7 @@ export async function getInstructorAssessmentSubmissions(assessmentId: string, p
   // Assessment details for course authorization & passingScore
   const { data: asm } = await supabaseAdmin
     .from('assessments')
-    .select('id, course_id, passing_score')
+    .select('id, course_id, passing_score, assessment_questions(id)')
     .eq('id', assessmentId)
     .maybeSingle();
 
@@ -785,7 +785,13 @@ export async function getInstructorAssessmentSubmissions(assessmentId: string, p
 
   if (error) throw error;
 
-  const attemptsList = attempts || [];
+  const attemptsList = (attempts || []).filter(
+    (att: any) =>
+      !(Number(att.score) === 0 && att.status === 'FAILED' && String(att.submitted_at || '').includes('59:59'))
+  );
+  const totalQuestions = Array.isArray((asm as any).assessment_questions)
+    ? (asm as any).assessment_questions.length || 10
+    : 10;
   const traineeIds = Array.from(new Set(attemptsList.map((att: any) => att.trainee_id)));
 
   let profilesMap = new Map<string, any>();
@@ -809,6 +815,7 @@ export async function getInstructorAssessmentSubmissions(assessmentId: string, p
 
   return attemptsList.map((att: any) => {
     const score = Number(att.score) || 0;
+    const correctCount = Math.round((score * totalQuestions) / 100);
     const isPassed = att.passed === true || att.status === 'PASSED' || score >= passingThreshold;
     const prof = profilesMap.get(att.trainee_id);
     const traineeName = prof ? `${prof.first_name || ''} ${prof.last_name || ''}`.trim() : '';
@@ -819,6 +826,9 @@ export async function getInstructorAssessmentSubmissions(assessmentId: string, p
       traineeAvatarUrl: prof?.avatar_url || null,
       traineeSrn: traineesMap.get(att.trainee_id) || '',
       score,
+      correctCount,
+      totalQuestions,
+      scoreDisplay: `${correctCount}/${totalQuestions} (${score}%)`,
       maxScore: 100,
       status: isPassed ? 'PASSED' : 'FAILED',
       result: isPassed ? 'PASSED' : 'FAILED',

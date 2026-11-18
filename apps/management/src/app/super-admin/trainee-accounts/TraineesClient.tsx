@@ -49,7 +49,7 @@ export default function TraineesClient() {
   const [selectedTrainee, setSelectedTrainee] = useState<any | null>(null);
   const [traineeDrawerDetails, setTraineeDrawerDetails] = useState<any | null>(null);
   const [drawerLoading, setDrawerLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'profile' | 'enrollments' | 'attendance' | 'certificates'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'enrollments' | 'assessments' | 'attendance' | 'certificates'>('profile');
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [stepUpOpen, setStepUpOpen] = useState(false);
   const [stepUpAction, setStepUpAction] = useState<{ action: string; traineeId: string } | null>(null);
@@ -562,7 +562,7 @@ export default function TraineesClient() {
                     <h2 className="text-base font-extrabold text-slate-900 dark:text-[#F8FAFC] font-heading">
                       {selectedTrainee.firstName} {selectedTrainee.lastName}
                     </h2>
-                    <p className="text-xs text-slate-400 font-mono">{selectedTrainee.srn} � {selectedTrainee.rank}</p>
+                    <p className="text-xs text-slate-400 font-mono">{selectedTrainee.srn} • {selectedTrainee.rank}</p>
                   </div>
                 </div>
                 <button
@@ -575,10 +575,11 @@ export default function TraineesClient() {
               </div>
 
               {/* Tabs */}
-              <div className="px-5 border-b border-slate-200 dark:border-slate-800 flex gap-4 text-xs font-mono">
+              <div className="px-5 border-b border-slate-200 dark:border-slate-800 flex gap-3 overflow-x-auto text-xs font-mono">
                 {[
                   { id: 'profile', label: 'Profile' },
-                  { id: 'enrollments', label: 'Enrollments' },
+                  { id: 'enrollments', label: 'Training History' },
+                  { id: 'assessments', label: 'Grades & Exams' },
                   { id: 'attendance', label: 'Attendance' },
                   { id: 'certificates', label: 'Certificates' },
                 ].map((tab) => (
@@ -795,19 +796,86 @@ export default function TraineesClient() {
                   <div className="space-y-3">
                     {traineeDrawerDetails?.enrollments?.length ? (
                       traineeDrawerDetails.enrollments.map((e: any) => (
-                        <div key={e.id} className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200/60 dark:border-slate-800 flex items-center justify-between">
-                          <div>
+                        <div key={e.id} className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200/60 dark:border-slate-800 space-y-1.5">
+                          <div className="flex items-center justify-between gap-2">
                             <div className="font-bold text-slate-900 dark:text-[#F8FAFC]">{e.courseTitle}</div>
-                            <div className="text-[11px] text-slate-400 font-mono">{e.enrollmentNo} � ?{e.paymentAmount.toLocaleString()}</div>
+                            <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-sky-500/15 text-sky-600 border border-sky-500/30">
+                              {e.status}
+                            </span>
                           </div>
-                          <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-sky-500/15 text-sky-600 border border-sky-500/30">
-                            {e.status}
-                          </span>
+                          <div className="flex flex-wrap items-center gap-2 text-[10px] font-mono text-slate-500">
+                            <span>{e.enrollmentNo}</span>
+                            <span>•</span>
+                            <span className="px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-bold">
+                              {e.courseCategory || 'MODULAR + PRACTICAL'}
+                            </span>
+                            <span>•</span>
+                            <span>Instructor Role: {e.instructorPurpose || 'PRACTICAL_TRAINING'}</span>
+                          </div>
+                          {e.reviewNotes && (
+                            <div className="text-[10px] font-mono text-slate-500 dark:text-slate-400 pt-0.5">
+                              {e.reviewNotes}
+                            </div>
+                          )}
                         </div>
                       ))
                     ) : (
-                      <div className="py-8 text-center text-slate-400 font-mono">No active enrollments for this trainee.</div>
+                      <div className="py-8 text-center text-slate-400 font-mono">No training history or enrollments for this trainee.</div>
                     )}
+                  </div>
+                )}
+
+                {activeTab === 'assessments' && (
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <span className="text-[10px] font-mono uppercase text-slate-400 font-bold block">
+                        Written Assessments &amp; Quizzes (Passing Standard: 75%)
+                      </span>
+                      {traineeDrawerDetails?.assessmentAttempts?.length ? (
+                        traineeDrawerDetails.assessmentAttempts.map((att: any) => (
+                          <div key={att.id} className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200/60 dark:border-slate-800 flex items-center justify-between gap-2">
+                            <div>
+                              <div className="font-bold text-slate-900 dark:text-[#F8FAFC]">{att.title}</div>
+                              <div className="text-[10px] text-slate-400 font-mono">
+                                {att.courseCode} • {att.type === 'POST_TEST' ? 'Course Post-Test' : 'Module Quiz'} • Pass: {att.passingScore}%
+                              </div>
+                            </div>
+                            <span className={`px-2.5 py-1 rounded-full text-[10px] font-mono font-bold shrink-0 ${
+                              att.passed
+                                ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
+                                : 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30'
+                            }`}>
+                              {att.scoreDisplay} • {att.passed ? 'PASSED' : 'FAILED'}
+                            </span>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="py-4 text-center text-slate-400 font-mono">No assessment attempts recorded yet.</div>
+                      )}
+                    </div>
+
+                    <div className="space-y-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+                      <span className="text-[10px] font-mono uppercase text-slate-400 font-bold block">
+                        Course Grades &amp; Practical Evaluations
+                      </span>
+                      {traineeDrawerDetails?.grades?.length ? (
+                        traineeDrawerDetails.grades.map((g: any) => (
+                          <div key={g.id} className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200/60 dark:border-slate-800 flex items-center justify-between">
+                            <div>
+                              <div className="font-bold text-slate-900 dark:text-[#F8FAFC]">{g.courseCode} — {g.courseTitle}</div>
+                              <div className="text-[10px] text-slate-400 font-mono">
+                                Theory: {g.moduleScore}% • Practical: {g.practicalScore}% • Attendance: {g.attendanceScore}%
+                              </div>
+                            </div>
+                            <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-sky-500/15 text-sky-600 border border-sky-500/30">
+                              Final: {g.finalScore}% ({g.status})
+                            </span>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="py-4 text-center text-slate-400 font-mono">No finalized course grades yet.</div>
+                      )}
+                    </div>
                   </div>
                 )}
 
@@ -818,7 +886,7 @@ export default function TraineesClient() {
                         <div key={a.id} className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200/60 dark:border-slate-800 flex items-center justify-between">
                           <div>
                             <div className="font-bold text-slate-900 dark:text-[#F8FAFC]">{a.courseTitle}</div>
-                            <div className="text-[11px] text-slate-400 font-mono">{a.date} � {a.sessionCode} ({a.room})</div>
+                            <div className="text-[11px] text-slate-400 font-mono">{a.date} • {a.sessionCode} ({a.room})</div>
                           </div>
                           <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${a.status === 'PRESENT' ? 'bg-sky-500/15 text-sky-600' : 'bg-amber-500/15 text-amber-600'}`}>
                             {a.status}
@@ -834,17 +902,28 @@ export default function TraineesClient() {
                 {activeTab === 'certificates' && (
                   <div className="space-y-3">
                     {traineeDrawerDetails?.certificates?.length ? (
-                      traineeDrawerDetails.certificates.map((c: any) => (
-                        <div key={c.id} className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200/60 dark:border-slate-800 flex items-center justify-between">
-                          <div>
-                            <div className="font-bold text-slate-900 dark:text-[#F8FAFC]">{c.courseTitle}</div>
-                            <div className="text-[11px] text-slate-400 font-mono">{c.certificateNo} � Exp: {c.expiryDate}</div>
+                      traineeDrawerDetails.certificates.map((c: any) => {
+                        const vStatus = c.validityStatus || c.status || 'VALID';
+                        const badgeStyle =
+                          vStatus === 'VALID'
+                            ? 'bg-emerald-500/15 text-emerald-600 border-emerald-500/30'
+                            : vStatus === 'NEAR_EXPIRATION'
+                            ? 'bg-amber-500/15 text-amber-600 border-amber-500/30'
+                            : vStatus === 'EXPIRED'
+                            ? 'bg-rose-500/15 text-rose-600 border-rose-500/30'
+                            : 'bg-sky-500/15 text-sky-600 border-sky-500/30';
+                        return (
+                          <div key={c.id} className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200/60 dark:border-slate-800 flex items-center justify-between">
+                            <div>
+                              <div className="font-bold text-slate-900 dark:text-[#F8FAFC]">{c.courseTitle}</div>
+                              <div className="text-[11px] text-slate-400 font-mono">{c.certificateNo} • Exp: {c.expiryDate || 'No Expiration'}</div>
+                            </div>
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold border ${badgeStyle}`}>
+                              {vStatus}
+                            </span>
                           </div>
-                          <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-sky-500/15 text-sky-600 border border-sky-500/30">
-                            {c.status}
-                          </span>
-                        </div>
-                      ))
+                        );
+                      })
                     ) : (
                       <div className="py-8 text-center text-slate-400 font-mono">No certificates issued yet.</div>
                     )}

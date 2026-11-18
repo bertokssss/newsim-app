@@ -5,6 +5,7 @@ import {
   uploadToLearningMaterialsStorage,
   validateMaterialUploadMeta,
   isInHouseModularCourse,
+  ensureDefaultAssessmentQuestions,
 } from '@newsim/database';
 import {
   applyCenterFilter,
@@ -355,6 +356,11 @@ export async function POST(request: NextRequest) {
         if (assessError) {
           console.warn('Assessment creation error:', assessError);
         } else if (newAssess) {
+          try {
+            await ensureDefaultAssessmentQuestions(newAssess.id, newAssess.title, 10);
+          } catch (seedErr) {
+            console.warn('Could not seed default 10 questions for course assessment:', seedErr);
+          }
           createdAssessment = formatAssessment(newAssess);
           await writeAdminAudit({
             actorId: ctx.user.id,

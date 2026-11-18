@@ -46,18 +46,31 @@ export async function POST(req: NextRequest) {
     const traineeId = auth.user.id;
 
     const body = await req.json();
-    const { courseId, batchId, packageId } = body;
+    const { courseId, batchId, packageId, enrollmentType, previousCertificateNumber, checklistConfirmed } = body;
 
     if (!courseId) {
       return NextResponse.json({ success: false, error: 'Course ID is required' }, { status: 400 });
     }
 
-    const application = await applyTraineeEnrollment(traineeId, courseId, batchId, packageId);
+    const application = await applyTraineeEnrollment(traineeId, courseId, batchId, packageId, {
+      enrollmentType,
+      previousCertificateNumber,
+      checklistConfirmed,
+    });
     return NextResponse.json({ success: true, data: application });
   } catch (error: any) {
     console.error('Failed to apply for enrollment in Supabase:', error);
     const code = error?.code || 'ENROLLMENT_FAILED';
-    const status = code === 'MISSING_SRN' ? 403 : code === 'PREREQUISITE_REQUIRED' ? 400 : code === 'BATCH_FULL' ? 409 : 500;
+    const status =
+      code === 'MISSING_SRN'
+        ? 403
+        : code === 'PREREQUISITE_REQUIRED' ||
+          code === 'CERTIFICATE_STILL_VALID' ||
+          code === 'REFRESHER_ELIGIBILITY_REQUIRED'
+        ? 400
+        : code === 'BATCH_FULL' || code === 'ONGOING_COURSE_EXISTS'
+        ? 409
+        : 500;
     return NextResponse.json(
       { success: false, error: error?.message || 'Failed to apply for enrollment', code },
       { status }

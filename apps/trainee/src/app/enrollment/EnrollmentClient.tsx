@@ -56,6 +56,11 @@ export default function EnrollmentClient() {
   const [missingSrnModalOpen, setMissingSrnModalOpen] = useState(false);
   const [prereqError, setPrereqError] = useState('');
   const [ongoingError, setOngoingError] = useState('');
+  const [enrollmentType, setEnrollmentType] = useState<'NEW' | 'REFRESHER'>('NEW');
+  const [previousCertNo, setPreviousCertNo] = useState('');
+  const [docGovIdChecked, setDocGovIdChecked] = useState(true);
+  const [docSirbChecked, setDocSirbChecked] = useState(true);
+  const [docPriorCertChecked, setDocPriorCertChecked] = useState(false);
 
   const fetchTraineeProfile = useCallback(async () => {
     try {
@@ -189,6 +194,15 @@ export default function EnrollmentClient() {
       return;
     }
 
+    if (!docGovIdChecked || !docSirbChecked || (enrollmentType === 'REFRESHER' && !docPriorCertChecked)) {
+      setErrorMessage('Please confirm all mandatory enrollment document checklist items before continuing.');
+      return;
+    }
+    if (enrollmentType === 'REFRESHER' && !previousCertNo.trim()) {
+      setErrorMessage('Please enter your previous STCW certificate number for REFRESHER validation.');
+      return;
+    }
+
     try {
       setApplying(true);
       setErrorMessage('');
@@ -201,6 +215,9 @@ export default function EnrollmentClient() {
           courseId: selectedCourseId,
           batchId: selectedBatchId || undefined,
           packageId: selectedPackageId || undefined,
+          enrollmentType,
+          previousCertificateNumber: enrollmentType === 'REFRESHER' ? previousCertNo.trim() : undefined,
+          checklistConfirmed: true,
         }),
       });
       const json = await res.json();
@@ -862,6 +879,82 @@ export default function EnrollmentClient() {
                             <span className="font-bold text-sky-600 dark:text-sky-400">
                               Set by Admin (No fixed schedule)
                             </span>
+                          </div>
+
+                          <div className="flex justify-between border-b border-slate-200 dark:border-slate-800 pb-2">
+                            <span className="text-slate-400">Category &amp; Pacing:</span>
+                            <span className="font-bold text-sky-600 dark:text-sky-400 text-right">
+                              {String(currentSelectedCourse.category || '').toLowerCase().includes('in-house')
+                                ? 'MODULAR / IN-HOUSE (Max 3 Days)'
+                                : 'MODULAR + PRACTICAL (Max 3 Days Modular)'}
+                            </span>
+                          </div>
+
+                          <div className="space-y-1.5 border-b border-slate-200 dark:border-slate-800 pb-2.5">
+                            <span className="text-slate-400 block">Enrollment Classification:</span>
+                            <div className="grid grid-cols-2 gap-2">
+                              {(['NEW', 'REFRESHER'] as const).map((typeOpt) => (
+                                <button
+                                  key={typeOpt}
+                                  type="button"
+                                  onClick={() => {
+                                    setEnrollmentType(typeOpt);
+                                    setErrorMessage('');
+                                  }}
+                                  className={`py-1.5 px-3 rounded-xl font-mono text-[11px] font-bold border transition-all cursor-pointer ${
+                                    enrollmentType === typeOpt
+                                      ? 'bg-sky-600 text-white border-sky-600 shadow-xs'
+                                      : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                                  }`}
+                                >
+                                  {typeOpt === 'NEW' ? 'NEW ENROLLMENT' : 'REFRESHER'}
+                                </button>
+                              ))}
+                            </div>
+                            {enrollmentType === 'REFRESHER' && (
+                              <div className="pt-1.5">
+                                <input
+                                  type="text"
+                                  value={previousCertNo}
+                                  onChange={(e) => setPreviousCertNo(e.target.value)}
+                                  placeholder="Enter previous STCW Certificate No. (e.g. CERT-2021-001)"
+                                  className="w-full px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-mono text-slate-900 dark:text-white outline-none focus:border-sky-500"
+                                />
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="space-y-1.5 border-b border-slate-200 dark:border-slate-800 pb-2.5">
+                            <span className="text-slate-400 block">Mandatory Prerequisite &amp; Document Checklist:</span>
+                            <label className="flex items-center gap-2 text-[11px] font-sans text-slate-700 dark:text-slate-200 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={docGovIdChecked}
+                                onChange={(e) => setDocGovIdChecked(e.target.checked)}
+                                className="rounded border-slate-300"
+                              />
+                              <span>Valid Government-Issued ID / MARINA ID Verified</span>
+                            </label>
+                            <label className="flex items-center gap-2 text-[11px] font-sans text-slate-700 dark:text-slate-200 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={docSirbChecked}
+                                onChange={(e) => setDocSirbChecked(e.target.checked)}
+                                className="rounded border-slate-300"
+                              />
+                              <span>Seafarer&apos;s Record Book (SIRB) &amp; SRN ({traineeProfile?.srn || 'Verified'})</span>
+                            </label>
+                            {enrollmentType === 'REFRESHER' && (
+                              <label className="flex items-center gap-2 text-[11px] font-sans text-slate-700 dark:text-slate-200 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={docPriorCertChecked}
+                                  onChange={(e) => setDocPriorCertChecked(e.target.checked)}
+                                  className="rounded border-slate-300"
+                                />
+                                <span>Previous Training Certificate (Expired / Eligible for Refresher)</span>
+                              </label>
+                            )}
                           </div>
 
                           <div className="flex justify-between border-b border-slate-200 dark:border-slate-800 pb-2">
